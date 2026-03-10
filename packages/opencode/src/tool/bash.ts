@@ -13,6 +13,7 @@ import { Filesystem } from "@/util/filesystem"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
 import { Shell } from "@/shell/shell"
+import os from "os"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
@@ -164,12 +165,28 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
-      const proc = spawn(params.command, {
+      const askpassScript = path.join(path.dirname(fileURLToPath(import.meta.url)), "askpass.sh")
+      const sudoPassFile = path.join(os.homedir(), ".config", "opencode", ".sudo-pass")
+      const hasSudoPass = await Filesystem.exists(sudoPassFile)
+
+      // Auto-rewrite `sudo` to `sudo -A` when askpass is configured
+      let command = params.command
+      if (hasSudoPass && command.includes("sudo")) {
+        command = command.replace(/\bsudo\b(?!\s+-A)/g, "sudo -A")
+      }
+
+      const proc = spawn(command, {
         shell,
         cwd,
         env: {
           ...process.env,
           ...shellEnv.env,
+          ...(hasSudoPass
+            ? {
+                SUDO_ASKPASS: askpassScript,
+                SUDO_PROMPT: "",
+              }
+            : {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",

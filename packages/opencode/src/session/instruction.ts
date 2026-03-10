@@ -149,9 +149,25 @@ export namespace InstructionPrompt {
     const config = await Config.get()
     const paths = await systemPaths()
 
+    // Max chars per instruction file to prevent context window overflow
+    const MAX_INSTRUCTION_CHARS = 20_000
+    // Max total chars for all instruction files combined
+    const MAX_TOTAL_INSTRUCTION_CHARS = 60_000
+    let totalChars = 0
+
     const files = Array.from(paths).map(async (p) => {
-      const content = await Filesystem.readText(p).catch(() => "")
-      return content ? "Instructions from: " + p + "\n" + content : ""
+      let content = await Filesystem.readText(p).catch(() => "")
+      if (!content) return ""
+      if (content.length > MAX_INSTRUCTION_CHARS) {
+        log.warn("instruction file truncated", { path: p, original: content.length, max: MAX_INSTRUCTION_CHARS })
+        content = content.slice(0, MAX_INSTRUCTION_CHARS) + "\n\n... (truncated — file too large for context window)"
+      }
+      totalChars += content.length
+      if (totalChars > MAX_TOTAL_INSTRUCTION_CHARS) {
+        log.warn("total instruction content exceeded limit, skipping", { path: p, totalChars })
+        return ""
+      }
+      return "Instructions from: " + p + "\n" + content
     })
 
     const urls: string[] = []
