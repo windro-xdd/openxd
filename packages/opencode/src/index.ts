@@ -15,6 +15,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import { FormatError } from "./cli/error"
 import { ServeCommand } from "./cli/cmd/serve"
 import { WorkspaceServeCommand } from "./cli/cmd/workspace-serve"
+import { DaemonCommand } from "./cli/cmd/daemon"
 import { Filesystem } from "./util/filesystem"
 import { DebugCommand } from "./cli/cmd/debug"
 import { StatsCommand } from "./cli/cmd/stats"
@@ -144,6 +145,7 @@ let cli = yargs(hideBin(process.argv))
   .command(UpgradeCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
+  .command(DaemonCommand)
   .command(WebCommand)
   .command(ModelsCommand)
   .command(StatsCommand)

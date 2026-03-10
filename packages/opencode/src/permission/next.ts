@@ -43,6 +43,14 @@ export namespace PermissionNext {
   })
   export type Ruleset = z.infer<typeof Ruleset>
 
+  // Files the agent can always edit without asking permission
+  const MEMORY_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md"]
+
+  function isMemoryFile(pattern: string): boolean {
+    const basename = pattern.split("/").pop() ?? ""
+    return MEMORY_FILES.includes(basename)
+  }
+
   export function fromConfig(permission: Config.Permission) {
     const ruleset: Ruleset = []
     for (const [key, value] of Object.entries(permission)) {
@@ -135,7 +143,14 @@ export namespace PermissionNext {
     async (input) => {
       const s = await state()
       const { ruleset, ...request } = input
+      let allAutoAllowed = true
       for (const pattern of request.patterns ?? []) {
+        // Auto-allow memory/identity files without asking
+        if (request.permission === "edit" && isMemoryFile(pattern)) {
+          log.info("auto-allowed memory file", { pattern })
+          continue
+        }
+        allAutoAllowed = false
         const rule = evaluate(request.permission, pattern, ruleset, s.approved)
         log.info("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny")
@@ -157,6 +172,8 @@ export namespace PermissionNext {
         }
         if (rule.action === "allow") continue
       }
+      // If all patterns were auto-allowed memory files, resolve immediately
+      if (allAutoAllowed && (request.patterns?.length ?? 0) > 0) return
     },
   )
 

@@ -17,6 +17,9 @@ const FILES = [
   "CONTEXT.md", // deprecated
 ]
 
+// Always loaded independently (not fallbacks like FILES)
+const ALWAYS_LOAD_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md"]
+
 function globalFiles() {
   const files = []
   if (Flag.OPENCODE_CONFIG_DIR) {
@@ -25,6 +28,17 @@ function globalFiles() {
   files.push(path.join(Global.Path.config, "AGENTS.md"))
   if (!Flag.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT) {
     files.push(path.join(os.homedir(), ".claude", "CLAUDE.md"))
+  }
+  return files
+}
+
+function globalAlwaysLoadFiles() {
+  const files = []
+  for (const name of ALWAYS_LOAD_FILES) {
+    if (Flag.OPENCODE_CONFIG_DIR) {
+      files.push(path.join(Flag.OPENCODE_CONFIG_DIR, name))
+    }
+    files.push(path.join(Global.Path.config, name))
   }
   return files
 }
@@ -74,6 +88,7 @@ export namespace InstructionPrompt {
     const paths = new Set<string>()
 
     if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+      // Instruction files: first match wins (AGENTS.md > CLAUDE.md > CONTEXT.md)
       for (const file of FILES) {
         const matches = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
         if (matches.length > 0) {
@@ -83,12 +98,28 @@ export namespace InstructionPrompt {
           break
         }
       }
+
+      // Always-load files: each loaded independently if it exists
+      for (const file of ALWAYS_LOAD_FILES) {
+        const matches = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
+        for (const p of matches) {
+          paths.add(path.resolve(p))
+        }
+      }
     }
 
+    // Global instruction files (first match wins)
     for (const file of globalFiles()) {
       if (await Filesystem.exists(file)) {
         paths.add(path.resolve(file))
         break
+      }
+    }
+
+    // Global always-load files (each loaded independently)
+    for (const file of globalAlwaysLoadFiles()) {
+      if (await Filesystem.exists(file)) {
+        paths.add(path.resolve(file))
       }
     }
 

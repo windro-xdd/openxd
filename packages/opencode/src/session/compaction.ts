@@ -47,6 +47,29 @@ export namespace SessionCompaction {
     return count >= usable
   }
 
+  /**
+   * Early pruning check — returns true when context usage is at ~70% of capacity.
+   * Prune early to avoid hitting full compaction which blocks the conversation.
+   */
+  export async function shouldPrune(input: { tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
+    const config = await Config.get()
+    if (config.compaction?.prune === false) return false
+    const context = input.model.limit.context
+    if (context === 0) return false
+
+    const count =
+      input.tokens.total ||
+      input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+
+    const reserved =
+      config.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model))
+    const usable = input.model.limit.input
+      ? input.model.limit.input - reserved
+      : context - ProviderTransform.maxOutputTokens(input.model)
+    // Trigger early prune at 70% capacity
+    return count >= usable * 0.7
+  }
+
   export const PRUNE_MINIMUM = 20_000
   export const PRUNE_PROTECT = 40_000
 
@@ -170,33 +193,43 @@ export namespace SessionCompaction {
       { sessionID: input.sessionID },
       { context: [], prompt: undefined },
     )
-    const defaultPrompt = `Provide a detailed prompt for continuing our conversation above.
-Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next.
-The summary that you construct will be used so that another agent can read it and continue the work.
+    const defaultPrompt = `Provide a detailed summary for continuing this conversation. Another agent will read this and continue the work seamlessly — it must not lose track of anything.
 
-When constructing the summary, try to stick to this template:
+Use this exact template:
 ---
-## Goal
+## Current Task
 
-[What goal(s) is the user trying to accomplish?]
+[What is the user CURRENTLY trying to do RIGHT NOW? Be specific — not "working on auth" but "adding RS256 JWT validation to the /api/login endpoint, replacing the old HS256 implementation"]
 
-## Instructions
+## Task State
 
-- [What important instructions did the user give you that are relevant]
-- [If there is a plan or spec, include information about it so next agent can continue using it]
+- Completed: [what's done, with specific file paths]
+- In Progress: [what's actively being worked on — the exact step that was interrupted]
+- Remaining: [what still needs to be done]
 
-## Discoveries
+## User Instructions
 
-[What notable things were learned during this conversation that would be useful for the next agent to know when continuing the work]
+- [List EVERY instruction, preference, or constraint the user gave — even small ones like "don't use semicolons" or "test with vitest not jest"]
+- [Include the original request verbatim if it was specific]
 
-## Accomplished
+## Key Discoveries
 
-[What work has been completed, what work is still in progress, and what work is left?]
+- [Non-obvious things learned: error patterns, API quirks, codebase patterns, gotchas]
+- [Things that DIDN'T work and why — so the next agent doesn't retry them]
 
-## Relevant files / directories
+## Files
 
-[Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand. If all the files in a directory are relevant, include the path to the directory.]
----`
+[Every file that was read, edited, or created — with a one-line note on what was done to each]
+- \`src/auth/jwt.ts\` — replaced HS256 with RS256, added token refresh
+- \`src/routes/login.ts\` — added rate limiter middleware
+- \`tests/auth.test.ts\` — created, 3 tests passing
+
+## Context
+
+[Any other context needed to continue: environment vars required, services that need to be running, branches checked out, etc.]
+---
+
+Be thorough. If the next agent asks "what was I doing?" this summary should answer it completely.`
 
     const promptText = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
     const result = await processor.process({

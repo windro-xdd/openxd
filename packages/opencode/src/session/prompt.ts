@@ -540,6 +540,15 @@ export namespace SessionPrompt {
         continue
       }
 
+      // early pruning — trim old tool outputs at 70% capacity to delay/avoid full compaction
+      if (
+        lastFinished &&
+        lastFinished.summary !== true &&
+        (await SessionCompaction.shouldPrune({ tokens: lastFinished.tokens, model }))
+      ) {
+        await SessionCompaction.prune({ sessionID })
+      }
+
       // context overflow, needs compaction
       if (
         lastFinished &&
