@@ -32,6 +32,8 @@ import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
 import { SessionHistoryTool } from "./session-history"
 import { MemoryTool } from "./memory"
+import { MemorySearchTool } from "./memory-search"
+import { BrowserTool } from "./browser"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -121,6 +123,8 @@ export namespace ToolRegistry {
       ApplyPatchTool,
       SessionHistoryTool,
       MemoryTool,
+      MemorySearchTool,
+      BrowserTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),

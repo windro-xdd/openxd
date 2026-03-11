@@ -20,6 +20,17 @@ const FILES = [
 // Always loaded independently (not fallbacks like FILES)
 const ALWAYS_LOAD_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md"]
 
+function todayDate(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+function yesterdayDate(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 function globalFiles() {
   const files = []
   if (Flag.OPENCODE_CONFIG_DIR) {
@@ -120,6 +131,23 @@ export namespace InstructionPrompt {
     for (const file of globalAlwaysLoadFiles()) {
       if (await Filesystem.exists(file)) {
         paths.add(path.resolve(file))
+      }
+    }
+
+    // Daily memory files: load today's and yesterday's if they exist
+    const dailyDates = [todayDate(), yesterdayDate()]
+    const dailyDirs = [
+      path.join(Instance.directory, ".opencode", "memory"),
+      path.join(Instance.directory, "memory"),
+      path.join(Global.Path.config, "memory"),
+    ]
+    for (const date of dailyDates) {
+      for (const dir of dailyDirs) {
+        const dailyPath = path.join(dir, `${date}.md`)
+        if (await Filesystem.exists(dailyPath)) {
+          paths.add(path.resolve(dailyPath))
+          break // found for this date, skip other dirs
+        }
       }
     }
 

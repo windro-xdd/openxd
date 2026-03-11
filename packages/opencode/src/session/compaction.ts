@@ -75,9 +75,37 @@ export namespace SessionCompaction {
 
   const PRUNE_PROTECTED_TOOLS = ["skill"]
 
+  // Tool priority for pruning: lower number = prune first
+  const TOOL_PRUNE_PRIORITY: Record<string, number> = {
+    ls: 1,
+    glob: 1,
+    bash: 2,
+    grep: 3,
+    codesearch: 3,
+    webfetch: 3,
+    websearch: 3,
+    read: 4,
+    memory: 5,
+    memory_search: 5,
+    session_history: 5,
+  }
+
+  function getToolPriority(tool: string): number {
+    return TOOL_PRUNE_PRIORITY[tool] ?? 2
+  }
+
+  // Soft trim: keep head + tail instead of fully clearing output
+  function softTrim(output: string, headChars = 750, tailChars = 750): string {
+    if (output.length <= headChars + tailChars + 50) return output
+    const head = output.slice(0, headChars)
+    const tail = output.slice(-tailChars)
+    const truncated = output.length - headChars - tailChars
+    return `${head}\n\n[... truncated ${truncated} chars ...]\n\n${tail}`
+  }
+
   // goes backwards through parts until there are 40_000 tokens worth of tool
-  // calls. then erases output of previous tool calls. idea is to throw away old
-  // tool calls that are no longer relevant.
+  // calls. then soft-trims output of previous tool calls instead of fully clearing.
+  // Prunes low-priority tools first (ls/glob before read).
   export async function prune(input: { sessionID: string }) {
     const config = await Config.get()
     if (config.compaction?.prune === false) return
@@ -85,7 +113,7 @@ export namespace SessionCompaction {
     const msgs = await Session.messages({ sessionID: input.sessionID })
     let total = 0
     let pruned = 0
-    const toPrune = []
+    const candidates: { part: any; priority: number; estimate: number }[] = []
     let turns = 0
 
     loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
@@ -103,21 +131,30 @@ export namespace SessionCompaction {
             const estimate = Token.estimate(part.state.output)
             total += estimate
             if (total > PRUNE_PROTECT) {
-              pruned += estimate
-              toPrune.push(part)
+              candidates.push({ part, priority: getToolPriority(part.tool), estimate })
             }
           }
       }
     }
-    log.info("found", { pruned, total })
+
+    // Sort candidates: prune low-priority tools first
+    candidates.sort((a, b) => a.priority - b.priority)
+
+    for (const { part, estimate } of candidates) {
+      pruned += estimate
+    }
+
+    log.info("found", { pruned, total, candidates: candidates.length })
     if (pruned > PRUNE_MINIMUM) {
-      for (const part of toPrune) {
+      for (const { part } of candidates) {
         if (part.state.status === "completed") {
+          // Soft trim instead of fully clearing
+          part.state.output = softTrim(part.state.output)
           part.state.time.compacted = Date.now()
           await Session.updatePart(part)
         }
       }
-      log.info("pruned", { count: toPrune.length })
+      log.info("pruned", { count: candidates.length })
     }
   }
 
@@ -229,7 +266,9 @@ Use this exact template:
 [Any other context needed to continue: environment vars required, services that need to be running, branches checked out, etc.]
 ---
 
-Be thorough. If the next agent asks "what was I doing?" this summary should answer it completely.`
+Be thorough. If the next agent asks "what was I doing?" this summary should answer it completely.
+
+IMPORTANT: Before summarizing, if you have access to the memory tool, save any key discoveries, decisions, or important context to MEMORY.md or today's daily memory file. This ensures nothing is permanently lost during compaction.`
 
     const promptText = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
     const result = await processor.process({

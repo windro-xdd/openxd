@@ -1199,6 +1199,56 @@ export namespace Config {
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
         })
         .optional(),
+      telegram: z
+        .object({
+          botToken: z.string().optional().describe("Telegram bot token from @BotFather"),
+          allowedUsers: z
+            .array(z.number())
+            .optional()
+            .describe("Telegram user IDs allowed to use the bot. Empty = allow all."),
+        })
+        .optional()
+        .describe("Telegram bot configuration for remote access"),
+      daemon: z
+        .object({
+          heartbeat: z
+            .object({
+              enabled: z.boolean().optional().describe("Enable heartbeat system (default: false)"),
+              intervalMinutes: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe("Heartbeat interval in minutes (default: 30)"),
+              quietHours: z
+                .object({
+                  start: z.string().optional().describe("Quiet hours start time (HH:MM, 24h format)"),
+                  end: z.string().optional().describe("Quiet hours end time (HH:MM, 24h format)"),
+                })
+                .optional()
+                .describe("Time range to skip heartbeats"),
+            })
+            .optional()
+            .describe("Heartbeat configuration for proactive checks"),
+        })
+        .optional()
+        .describe("Daemon configuration"),
+      browser: z
+        .object({
+          relay: z
+            .object({
+              enabled: z.boolean().optional().describe("Enable browser relay WebSocket server (default: false)"),
+              port: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe("Port for browser relay WebSocket server (default: 4097)"),
+            })
+            .optional(),
+        })
+        .optional()
+        .describe("Browser extension relay configuration"),
     })
     .strict()
     .meta({
