@@ -10,15 +10,12 @@ import { SessionRevert } from "./revert"
 import { Session } from "."
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider/provider"
-import { type Tool as AITool, tool, jsonSchema, type ToolCallOptions, asSchema } from "ai"
+import { type Tool as AITool } from "ai"
 import { SessionCompaction } from "./compaction"
 import { Instance } from "../project/instance"
 import { Bus } from "../bus"
-import { ProviderTransform } from "../provider/transform"
-import { Token } from "../util/token"
 import { SystemPrompt } from "./system"
 import { InstructionPrompt } from "./instruction"
-import { Observation } from "../observation/observation"
 import { Plugin } from "../plugin"
 import PROMPT_PLAN from "../session/prompt/plan.txt"
 import BUILD_SWITCH from "../session/prompt/build-switch.txt"
@@ -50,46 +47,25 @@ import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
 import { Mode } from "@/mode"
 import { LoopController } from "@/loop"
+import {
+  createStructuredOutputTool as createStructuredOutputToolInner,
+  STRUCTURED_OUTPUT_SYSTEM_PROMPT,
+} from "./prompt-structured-output"
+import { injectCorrectionReminder, injectQueuedUserReminder } from "./prompt-reminders"
+import { applyTokenPreflight } from "./prompt-budget"
+import { resolveTools as resolveToolsInner } from "./prompt-tools"
+
+type TextItem = Extract<MessageV2.Part, { type: "text" }>
+type AlsoResult = {
+  info: MessageV2.User
+  parts: [TextItem]
+}
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
 
-const STRUCTURED_OUTPUT_DESCRIPTION = `Use this tool to return your final response in the requested structured format.
-
-IMPORTANT:
-- You MUST call this tool exactly once at the end of your response
-- The input must be valid JSON matching the required schema
-- Complete all necessary research and tool calls BEFORE calling this tool
-- This tool provides your final answer - no further actions are taken after calling it`
-
-const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
-
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
-
-  const CORRECTION_PATTERNS = [
-    /\bno[,.\s!]|^no$/i,
-    /\bwrong\b/i,
-    /\bnot what i/i,
-    /\bnot right\b/i,
-    /\bincorrect\b/i,
-    /\byou missed\b/i,
-    /\byou forgot\b/i,
-    /\bstill not\b/i,
-    /\bthat('s| is) not\b/i,
-    /\bi (said|told you|already|mentioned)\b/i,
-    /\brevert\b/i,
-    /\bundo\b/i,
-    /\bthat broke\b/i,
-    /\bwhy did you\b/i,
-    /\bnope\b/i,
-  ]
-
-  function detectCorrection(text: string): boolean {
-    const lower = text.toLowerCase().trim()
-    if (lower.length > 500) return false // long messages are usually new requests
-    return CORRECTION_PATTERNS.some((p) => p.test(lower))
-  }
 
   const state = Instance.state(
     () => {
@@ -697,40 +673,14 @@ export namespace SessionPrompt {
         })
       }
 
-      // Ephemerally wrap queued user messages with a reminder to stay on track
       if (step > 1 && lastFinished) {
-        for (const msg of msgs) {
-          if (msg.info.role !== "user" || msg.info.id <= lastFinished.id) continue
-          for (const part of msg.parts) {
-            if (part.type !== "text" || part.ignored || part.synthetic) continue
-            if (!part.text.trim()) continue
-            part.text = [
-              "<system-reminder>",
-              "The user sent the following message:",
-              part.text,
-              "",
-              "Please address this message and continue with your tasks.",
-              "</system-reminder>",
-            ].join("\n")
-          }
-        }
+        injectQueuedUserReminder(msgs, lastFinished.id)
       }
 
       await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-      // Detect user corrections and inject lesson-logging reminder
       if (lastUser && step > 0) {
-        for (const msg of msgs) {
-          if (msg.info.role !== "user" || msg.info.id !== lastUser.id) continue
-          for (const part of msg.parts) {
-            if (part.type !== "text" || part.ignored || part.synthetic) continue
-            if (detectCorrection(part.text)) {
-              part.text +=
-                "\n\n<system-reminder>The user appears to be correcting you. IMMEDIATELY call memory(action: 'lesson', content: '...') to log what you did wrong and what to do instead. Be specific — generic lessons like 'be more careful' are useless. Then fix the issue.</system-reminder>"
-              break
-            }
-          }
-        }
+        injectCorrectionReminder(msgs, lastUser.id)
       }
 
       // Build system prompt, adding structured output instruction if needed
@@ -771,110 +721,16 @@ export namespace SessionPrompt {
         }
       }
 
-      // === PRE-FLIGHT TOKEN CHECK ===
-      // Estimate total tokens BEFORE sending to the API to avoid 413 / context overflow errors.
-      // This catches cases where large image attachments push us over the limit even though
-      // the sliding window thought we were fine (because it previously didn't count file parts).
-      {
-        const contextLimit = model.limit.context || 200_000
-        const inputLimit = model.limit.input || contextLimit
-        const maxOutput = ProviderTransform.maxOutputTokens(model)
-        const safeInputLimit = Math.floor((inputLimit - maxOutput) * 0.9) // 90% of usable input space
-
-        let estimatedTokens = 0
-        // Count system prompt tokens
-        for (const s of system) {
-          estimatedTokens += Token.estimate(typeof s === "string" ? s : JSON.stringify(s))
-        }
-        // Count message tokens (including file/image data URLs and tool attachments like screenshots)
-        for (const msg of effectiveMsgs) {
-          for (const part of msg.parts) {
-            if (part.type === "text") {
-              estimatedTokens += Token.estimate(part.text)
-            } else if (part.type === "tool") {
-              const output = part.state.status === "completed" ? (part.state.output ?? "") : ""
-              estimatedTokens += Token.estimate(output) + Token.estimate(JSON.stringify(part.state.input ?? {}))
-              // Count tool attachments (browser screenshots, images from tool results)
-              if (part.state.status === "completed" && !part.state.time.compacted) {
-                for (const att of part.state.attachments ?? []) {
-                  estimatedTokens += Token.estimateDataUrl((att as any).url ?? "")
-                }
-              }
-            } else if (part.type === "file") {
-              estimatedTokens += Token.estimateDataUrl((part as any).url ?? "")
-            }
-          }
-        }
-
-        if (estimatedTokens > safeInputLimit) {
-          log.info("pre-flight: estimated tokens exceed safe limit, pruning + re-windowing", {
-            sessionID,
-            estimatedTokens,
-            safeInputLimit,
-            contextLimit,
-          })
-
-          // Step 1: Emergency prune old tool outputs
-          await SessionCompaction.emergencyPrune({ sessionID })
-
-          // Step 2: Re-fetch messages and re-apply sliding window
-          msgs = await Session.messages({ sessionID })
-          effectiveMsgs = SessionCompaction.slidingWindow(msgs, model)
-
-          // Step 3: Re-estimate — if still over, strip media from older messages (keep only last turn's images)
-          let reEstimated = 0
-          for (const s of system) {
-            reEstimated += Token.estimate(typeof s === "string" ? s : JSON.stringify(s))
-          }
-          for (const msg of effectiveMsgs) {
-            for (const part of msg.parts) {
-              if (part.type === "text") {
-                reEstimated += Token.estimate(part.text)
-              } else if (part.type === "tool") {
-                const output = part.state.status === "completed" ? (part.state.output ?? "") : ""
-                reEstimated += Token.estimate(output) + Token.estimate(JSON.stringify(part.state.input ?? {}))
-                if (part.state.status === "completed" && !part.state.time.compacted) {
-                  for (const att of part.state.attachments ?? []) {
-                    reEstimated += Token.estimateDataUrl((att as any).url ?? "")
-                  }
-                }
-              } else if (part.type === "file") {
-                reEstimated += Token.estimateDataUrl((part as any).url ?? "")
-              }
-            }
-          }
-
-          if (reEstimated > safeInputLimit) {
-            log.info("pre-flight: still over limit after pruning, stripping old media", {
-              sessionID,
-              reEstimated,
-              safeInputLimit,
-            })
-            // Strip media from all messages except the last user message
-            const lastUserIdx = effectiveMsgs.findLastIndex((m) => m.info.role === "user")
-            for (let i = 0; i < effectiveMsgs.length; i++) {
-              if (i === lastUserIdx) continue // keep the latest user message's attachments
-              const msg = effectiveMsgs[i]
-              // Strip file parts that are media
-              msg.parts = msg.parts.filter((p) => {
-                if (p.type === "file" && MessageV2.isMedia((p as any).mime ?? "")) {
-                  return false // strip old media
-                }
-                return true
-              })
-              // Strip tool attachments (browser screenshots etc.) — mark as compacted in-memory
-              for (const part of msg.parts) {
-                if (part.type === "tool" && part.state.status === "completed" && !part.state.time.compacted) {
-                  if (part.state.attachments?.length) {
-                    part.state.attachments = []
-                    part.state.time.compacted = Date.now()
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      effectiveMsgs = await applyTokenPreflight({
+        model,
+        sessionID,
+        system,
+        messages: effectiveMsgs,
+        log,
+        async reload() {
+          return Session.messages({ sessionID })
+        },
+      })
 
       const result = await processor.process({
         user: lastUser,
@@ -1002,229 +858,15 @@ export namespace SessionPrompt {
     bypassAgentCheck: boolean
     messages: MessageV2.WithParts[]
   }) {
-    using _ = log.time("resolveTools")
-    const tools: Record<string, AITool> = {}
-
-    const context = (args: any, options: ToolCallOptions): Tool.Context => ({
-      sessionID: input.session.id,
-      abort: options.abortSignal!,
-      messageID: input.processor.message.id,
-      callID: options.toolCallId,
-      extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck },
-      agent: input.agent.name,
-      messages: input.messages,
-      metadata: async (val: { title?: string; metadata?: any }) => {
-        const match = input.processor.partFromToolCall(options.toolCallId)
-        if (match && match.state.status === "running") {
-          await Session.updatePart({
-            ...match,
-            state: {
-              title: val.title,
-              metadata: val.metadata,
-              status: "running",
-              input: args,
-              time: {
-                start: Date.now(),
-              },
-            },
-          })
-        }
-      },
-      async ask(req) {
-        await PermissionNext.ask({
-          ...req,
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: PermissionNext.merge(input.agent.permission, input.session.permission ?? []),
-        })
-      },
-    })
-
-    for (const item of await ToolRegistry.tools(
-      { modelID: input.model.api.id, providerID: input.model.providerID },
-      input.agent,
-    )) {
-      const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
-      tools[item.id] = tool({
-        id: item.id as any,
-        description: item.description,
-        inputSchema: jsonSchema(schema as any),
-        async execute(args, options) {
-          const ctx = context(args, options)
-          await Plugin.trigger(
-            "tool.execute.before",
-            {
-              tool: item.id,
-              sessionID: ctx.sessionID,
-              callID: ctx.callID,
-            },
-            {
-              args,
-            },
-          )
-          const result = await item.execute(args, ctx)
-          const output = {
-            ...result,
-            attachments: result.attachments?.map((attachment) => ({
-              ...attachment,
-              id: Identifier.ascending("part"),
-              sessionID: ctx.sessionID,
-              messageID: input.processor.message.id,
-            })),
-          }
-          await Plugin.trigger(
-            "tool.execute.after",
-            {
-              tool: item.id,
-              sessionID: ctx.sessionID,
-              callID: ctx.callID,
-              args,
-            },
-            output,
-          )
-
-          // Capture observation for cross-session memory
-          if (output.output) {
-            Observation.capture({
-              projectId: Instance.project.id,
-              sessionId: ctx.sessionID,
-              tool: item.id,
-              input: args,
-              output: output.output,
-            }).catch((err) => {
-              log.debug("observation capture failed", { err })
-            })
-          }
-
-          return output
-        },
-      })
-    }
-
-    for (const [key, item] of Object.entries(await MCP.tools())) {
-      const execute = item.execute
-      if (!execute) continue
-
-      const transformed = ProviderTransform.schema(input.model, asSchema(item.inputSchema).jsonSchema)
-      item.inputSchema = jsonSchema(transformed)
-      // Wrap execute to add plugin hooks and format output
-      item.execute = async (args, opts) => {
-        const ctx = context(args, opts)
-
-        await Plugin.trigger(
-          "tool.execute.before",
-          {
-            tool: key,
-            sessionID: ctx.sessionID,
-            callID: opts.toolCallId,
-          },
-          {
-            args,
-          },
-        )
-
-        await ctx.ask({
-          permission: key,
-          metadata: {},
-          patterns: ["*"],
-          always: ["*"],
-        })
-
-        const result = await execute(args, opts)
-
-        await Plugin.trigger(
-          "tool.execute.after",
-          {
-            tool: key,
-            sessionID: ctx.sessionID,
-            callID: opts.toolCallId,
-            args,
-          },
-          result,
-        )
-
-        const textParts: string[] = []
-        const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
-
-        for (const contentItem of result.content) {
-          if (contentItem.type === "text") {
-            textParts.push(contentItem.text)
-          } else if (contentItem.type === "image") {
-            attachments.push({
-              type: "file",
-              mime: contentItem.mimeType,
-              url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
-            })
-          } else if (contentItem.type === "resource") {
-            const { resource } = contentItem
-            if (resource.text) {
-              textParts.push(resource.text)
-            }
-            if (resource.blob) {
-              attachments.push({
-                type: "file",
-                mime: resource.mimeType ?? "application/octet-stream",
-                url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
-                filename: resource.uri,
-              })
-            }
-          }
-        }
-
-        const truncated = await Truncate.output(textParts.join("\n\n"), {}, input.agent)
-        const metadata = {
-          ...(result.metadata ?? {}),
-          truncated: truncated.truncated,
-          ...(truncated.truncated && { outputPath: truncated.outputPath }),
-        }
-
-        return {
-          title: "",
-          metadata,
-          output: truncated.content,
-          attachments: attachments.map((attachment) => ({
-            ...attachment,
-            id: Identifier.ascending("part"),
-            sessionID: ctx.sessionID,
-            messageID: input.processor.message.id,
-          })),
-          content: result.content, // directly return content to preserve ordering when outputting to model
-        }
-      }
-      tools[key] = item
-    }
-
-    return tools
+    return resolveToolsInner(input, log)
   }
 
   /** @internal Exported for testing */
   export function createStructuredOutputTool(input: {
-    schema: Record<string, any>
+    schema: Record<string, unknown>
     onSuccess: (output: unknown) => void
   }): AITool {
-    // Remove $schema property if present (not needed for tool input)
-    const { $schema, ...toolSchema } = input.schema
-
-    return tool({
-      id: "StructuredOutput" as any,
-      description: STRUCTURED_OUTPUT_DESCRIPTION,
-      inputSchema: jsonSchema(toolSchema as any),
-      async execute(args) {
-        // AI SDK validates args against inputSchema before calling execute()
-        input.onSuccess(args)
-        return {
-          output: "Structured output captured successfully.",
-          title: "Structured Output",
-          metadata: { valid: true },
-        }
-      },
-      toModelOutput(result) {
-        return {
-          type: "text",
-          value: result.output,
-        }
-      },
-    })
+    return createStructuredOutputToolInner(input)
   }
 
   async function createUserMessage(input: PromptInput) {
@@ -2080,8 +1722,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           })) as MessageV2.WithParts
 
           const resultText =
-            (result.parts.findLast((x): x is Extract<typeof x, { type: "text" }> => x.type === "text") as any)?.text ??
-            "Task completed (no text output)"
+            result.parts.findLast((x): x is TextItem => x.type === "text")?.text ?? "Task completed (no text output)"
 
           // Merge result back into parent session
           const parentMessageID = Identifier.ascending("message")
@@ -2152,7 +1793,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       taskPromise.catch(() => {}) // prevent unhandled rejection
 
       // Return the notification message immediately — don't block
-      return {
+      const output: AlsoResult = {
         info: {
           id: notifyMessageID,
           sessionID: input.sessionID,
@@ -2170,7 +1811,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             text: `⚡ Parallel task started: ${task}`,
           },
         ],
-      } as any
+      }
+      return output
     }
 
     const command = await Command.get(input.command)
