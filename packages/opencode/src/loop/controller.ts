@@ -238,8 +238,8 @@ function findLastAssistant(msgs: MessageV2.WithParts[]): MessageV2.WithParts | u
 
 function extractAssistantText(msg: MessageV2.WithParts): string {
   return msg.parts
-    .filter((p) => p.type === "text")
-    .map((p) => (p as any).text ?? "")
+    .filter((p): p is MessageV2.TextPart => p.type === "text")
+    .map((p) => p.text)
     .join("\n")
 }
 

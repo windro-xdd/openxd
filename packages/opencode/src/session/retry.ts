@@ -117,4 +117,39 @@ export namespace SessionRetry {
     } catch {}
     return false
   }
+
+  /**
+   * Returns true when provider says selected model is unavailable/unsupported.
+   * Used to auto-cycle fallback models instead of hard-stopping the session.
+   */
+  export function isModelUnsupported(error: ReturnType<NamedError["toObject"]>): boolean {
+    if (MessageV2.APIError.isInstance(error)) {
+      const msg = error.data.message?.toLowerCase() ?? ""
+      if (
+        msg.includes("requested model is not supported") ||
+        msg.includes("model is not supported") ||
+        msg.includes("model not supported") ||
+        msg.includes("model_not_found") ||
+        msg.includes("unknown model") ||
+        msg.includes("does not support model")
+      ) {
+        return true
+      }
+    }
+    try {
+      const json = typeof error.data?.message === "string" ? JSON.parse(error.data.message) : undefined
+      if (!json) return false
+      const code = typeof json.code === "string" ? json.code.toLowerCase() : ""
+      const msg = typeof json.message === "string" ? json.message.toLowerCase() : ""
+      if (
+        code.includes("model_not_found") ||
+        code.includes("unsupported_model") ||
+        msg.includes("requested model is not supported") ||
+        msg.includes("unknown model")
+      ) {
+        return true
+      }
+    } catch {}
+    return false
+  }
 }

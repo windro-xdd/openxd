@@ -1,0 +1,13 @@
+Explore code symbols in a file or workspace using LSP intelligence.
+
+Returns a structured tree of symbols (classes, functions, methods, interfaces, etc.) with their locations. Use this to understand code structure before editing.
+
+Actions:
+- "file": List all symbols in a specific file as a tree (functions, classes, methods, etc.)
+- "workspace": Search for symbols across the entire workspace by name
+- "outline": Get a compact outline of a file (names + line numbers only)
+
+Examples:
+- Explore symbols in a file: symbols(action="file", path="src/config.ts")
+- Search workspace for a class: symbols(action="workspace", query="Config")
+- Quick outline: symbols(action="outline", path="src/tool/edit.ts")

@@ -58,7 +58,7 @@ export namespace Heartbeat {
   async function tick() {
     try {
       const config = await Config.get()
-      const hbConfig = (config as any).daemon?.heartbeat
+      const hbConfig = config.daemon?.heartbeat
       if (!hbConfig?.enabled) return
 
       // Check quiet hours

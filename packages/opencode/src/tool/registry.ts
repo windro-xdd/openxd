@@ -26,6 +26,7 @@ import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
+import { SymbolsTool } from "./symbols"
 import { Truncate } from "./truncation"
 
 import { ApplyPatchTool } from "./apply_patch"
@@ -38,6 +39,8 @@ import { BrowserTool } from "./browser"
 import { TelegramTool } from "./telegram"
 import { AlsoTool } from "./also"
 import { ObservationSearchTool, ObservationGetTool } from "./observation_search"
+import { BatchEditTool } from "./batch_edit"
+import { DepsTool } from "./deps"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -136,6 +139,9 @@ export namespace ToolRegistry {
       AlsoTool,
       ObservationSearchTool,
       ObservationGetTool,
+      SymbolsTool,
+      BatchEditTool,
+      DepsTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),

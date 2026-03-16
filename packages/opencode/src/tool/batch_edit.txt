@@ -1,0 +1,22 @@
+Apply the same string replacement across multiple files.
+
+Use this when you need to make the same edit (rename, pattern replacement) across many files at once. Safer and faster than calling edit multiple times.
+
+Parameters:
+- files: Array of file paths (absolute or relative)
+- oldString: The exact string to find and replace
+- newString: The replacement string
+- replaceAll: If true, replace all occurrences in each file (default: false)
+
+Safety:
+- Validates that oldString exists in each file before making any changes
+- Reports which files were modified and which were skipped
+- Atomic per-file (each file either fully succeeds or is unchanged)
+
+Example:
+batch_edit(
+  files=["src/a.ts", "src/b.ts", "src/c.ts"],
+  oldString="oldFunctionName",
+  newString="newFunctionName",
+  replaceAll=true
+)

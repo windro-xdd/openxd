@@ -367,8 +367,8 @@ export namespace SessionProcessor {
               if (retry !== undefined) {
                 attempt++
 
-                // Rate limit fallback — cycle to next model instead of sleeping
-                if (SessionRetry.isRateLimit(error)) {
+                // Fallback cycle — for rate-limit OR unsupported model errors
+                if (SessionRetry.isRateLimit(error) || SessionRetry.isModelUnsupported(error)) {
                   const cfg = await Config.get()
                   const fallback = cfg.rateLimitFallback
                   if (fallback?.enabled && fallback.models?.length) {
@@ -383,12 +383,13 @@ export namespace SessionProcessor {
                       const modelID = slash === -1 ? nextID : nextID.slice(slash + 1)
                       const next = await Provider.getModel(providerID, modelID).catch(() => undefined)
                       if (next) {
-                        log.info("rate-limit-fallback", { from: cur, to: nextID })
+                        const reason = SessionRetry.isRateLimit(error) ? "rate limited" : "model unsupported"
+                        log.info("rate-limit-fallback", { from: cur, to: nextID, reason })
                         streamInput.model = next
                         SessionStatus.set(input.sessionID, {
                           type: "retry",
                           attempt,
-                          message: `Rate limited on ${cur} — switching to ${nextID}`,
+                          message: `${reason} on ${cur} - switching to ${nextID}`,
                           next: Date.now(),
                         })
                         continue

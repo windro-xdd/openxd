@@ -1,0 +1,21 @@
+Analyze import/export dependencies for a file or module.
+
+Actions:
+- "imports": Show what a file imports (direct dependencies)
+- "imported_by": Show what files import a given file (reverse dependencies)
+- "graph": Show both imports and imported_by for a file
+
+Use this to understand module relationships before refactoring. Helps answer:
+- "What will break if I change this file?"
+- "What does this file depend on?"
+- "How is this module connected to the rest of the codebase?"
+
+Parameters:
+- action: "imports" | "imported_by" | "graph"
+- path: File path to analyze
+- depth: How many levels deep to traverse (default: 1, max: 3)
+
+Examples:
+- deps(action="imports", path="src/config/config.ts")
+- deps(action="imported_by", path="src/util/log.ts")
+- deps(action="graph", path="src/session/processor.ts", depth=2)
