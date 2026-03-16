@@ -1,6 +1,14 @@
 import { test, expect, describe } from "bun:test"
 import { extractResponseText, formatPromptTooLargeError } from "../../src/cli/cmd/github"
 import type { MessageV2 } from "../../src/session/message-v2"
+import {
+  getEventFlags,
+  getUserPrompt,
+  getIssueId,
+  getTriggerCommentId,
+  getCommentType,
+} from "../../src/cli/cmd/github/prompt"
+import type { Context } from "@actions/github/lib/context"
 
 // Helper to create minimal valid parts
 function createTextPart(text: string): MessageV2.Part {
@@ -193,5 +201,115 @@ describe("formatPromptTooLargeError", () => {
     expect(result).toInclude("img1.png (3 KB)")
     expect(result).toInclude("img2.jpg (6 KB)")
     expect(result).toInclude("img3.gif (9 KB)")
+  })
+})
+
+describe("github.prompt event routing", () => {
+  function context(eventName: string): Context {
+    return {
+      eventName,
+    } as Context
+  }
+
+  test("getEventFlags marks comment event as user event", () => {
+    const flags = getEventFlags(context("issue_comment"))
+    expect(flags.isUserEvent).toBe(true)
+    expect(flags.isCommentEvent).toBe(true)
+    expect(flags.isRepoEvent).toBe(false)
+    expect(flags.isIssuesEvent).toBe(false)
+  })
+
+  test("getEventFlags marks schedule event as repo event", () => {
+    const flags = getEventFlags(context("schedule"))
+    expect(flags.isRepoEvent).toBe(true)
+    expect(flags.isScheduleEvent).toBe(true)
+    expect(flags.isUserEvent).toBe(false)
+    expect(flags.isCommentEvent).toBe(false)
+  })
+
+  test("getIssueId resolves issue number for issue_comment payload", () => {
+    const id = getIssueId({
+      context: context("issue_comment"),
+      payload: {
+        issue: { number: 42 },
+      } as any,
+      isRepoEvent: false,
+    })
+    expect(id).toBe(42)
+  })
+
+  test("getIssueId resolves pull request number for review comment payload", () => {
+    const id = getIssueId({
+      context: context("pull_request_review_comment"),
+      payload: {
+        pull_request: { number: 77 },
+      } as any,
+      isRepoEvent: false,
+    })
+    expect(id).toBe(77)
+  })
+
+  test("getIssueId returns undefined for repo events", () => {
+    const id = getIssueId({
+      context: context("schedule"),
+      payload: {} as any,
+      isRepoEvent: true,
+    })
+    expect(id).toBeUndefined()
+  })
+
+  test("getTriggerCommentId returns comment id only for comment events", () => {
+    const comment = getTriggerCommentId({
+      payload: { comment: { id: 99 } } as any,
+      isCommentEvent: true,
+    })
+    expect(comment).toBe(99)
+
+    const none = getTriggerCommentId({
+      payload: { comment: { id: 100 } } as any,
+      isCommentEvent: false,
+    })
+    expect(none).toBeUndefined()
+  })
+
+  test("getCommentType routes review comments to pr_review", () => {
+    expect(getCommentType({ context: context("pull_request_review_comment"), isCommentEvent: true })).toBe("pr_review")
+    expect(getCommentType({ context: context("issue_comment"), isCommentEvent: true })).toBe("issue")
+    expect(getCommentType({ context: context("schedule"), isCommentEvent: false })).toBeUndefined()
+  })
+
+  test("getUserPrompt extracts attachment markdown into prompt files", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(Uint8Array.from([1, 2, 3, 4]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      })) as unknown as typeof fetch
+
+    try {
+      const result = await getUserPrompt({
+        context: context("issue_comment"),
+        payload: {
+          comment: {
+            body: "Please /oc review this image ![shot](https://github.com/user-attachments/files/example.png)",
+            id: 1,
+          },
+        } as any,
+        isRepoEvent: false,
+        isIssuesEvent: false,
+        isCommentEvent: true,
+        appToken: "test-token",
+      })
+
+      expect(result.userPrompt).toContain("@example.png")
+      expect(result.userPrompt).not.toContain("https://github.com/user-attachments/")
+      expect(result.promptFiles.length).toBe(1)
+      expect(result.promptFiles[0].filename).toBe("example.png")
+      expect(result.promptFiles[0].mime).toBe("image/png")
+      expect(result.promptFiles[0].content.length).toBeGreaterThan(0)
+      expect(result.promptFiles[0].replacement).toBe("@example.png")
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

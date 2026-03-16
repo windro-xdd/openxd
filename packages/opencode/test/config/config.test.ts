@@ -1692,6 +1692,61 @@ test("wellknown URL with trailing slash is normalized", async () => {
   }
 })
 
+test("ignores malformed remote wellknown payload config shape", async () => {
+  const originalFetch = globalThis.fetch
+  const mockFetch = mock((url: string | URL | Request) => {
+    const urlStr = url.toString()
+    if (urlStr.includes(".well-known/opencode")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            config: ["unexpected-array-shape"],
+          }),
+          { status: 200 },
+        ),
+      )
+    }
+    return originalFetch(url)
+  })
+  globalThis.fetch = mockFetch as unknown as typeof fetch
+
+  const originalAuthAll = Auth.all
+  Auth.all = mock(() =>
+    Promise.resolve({
+      "https://example.com": {
+        type: "wellknown" as const,
+        key: "TEST_TOKEN",
+        token: "test-token",
+      },
+    }),
+  )
+
+  try {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            model: "openai/gpt-5.2",
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        expect(config.model).toBe("openai/gpt-5.2")
+      },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+    Auth.all = originalAuthAll
+  }
+})
+
 describe("getPluginName", () => {
   test("extracts name from file:// URL", () => {
     expect(Config.getPluginName("file:///path/to/plugin/foo.js")).toBe("foo")

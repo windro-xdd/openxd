@@ -1,10 +1,12 @@
-import { test, expect } from "bun:test"
+import { test, expect, mock } from "bun:test"
 import path from "path"
 
 import { tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider/provider"
 import { Env } from "../../src/env"
+import { Plugin } from "../../src/plugin"
+import { Auth } from "../../src/auth"
 
 test("provider loaded from env variable", async () => {
   await using tmp = await tmpdir({
@@ -1054,6 +1056,74 @@ test("provider with custom npm package", async () => {
       expect(providers["local-llm"].options.baseURL).toBe("http://localhost:11434/v1")
     },
   })
+})
+
+test("plugin auth loader merges with provider options without clobbering config", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          provider: {
+            anthropic: {
+              options: {
+                timeout: 60000,
+              },
+            },
+          },
+        }),
+      )
+    },
+  })
+
+  const originalPluginList = Plugin.list
+  const originalAuthGet = Auth.get
+
+  Plugin.list = mock(async () => [
+    {
+      auth: {
+        provider: "anthropic",
+        loader: async (getAuth: () => Promise<{ key?: string } | undefined>) => {
+          const auth = await getAuth()
+          return {
+            headers: {
+              "x-plugin-auth": auth?.key ?? "missing",
+            },
+          }
+        },
+      },
+    } as any,
+  ])
+
+  Auth.get = mock(async (providerID: string) => {
+    if (providerID === "anthropic") {
+      return {
+        type: "api",
+        key: "plugin-auth-key",
+      } as any
+    }
+    return undefined
+  })
+
+  try {
+    await Instance.provide({
+      directory: tmp.path,
+      init: async () => {
+        Env.set("ANTHROPIC_API_KEY", "env-api-key")
+      },
+      fn: async () => {
+        const providers = await Provider.list()
+        expect(providers["anthropic"]).toBeDefined()
+        expect(providers["anthropic"].options.timeout).toBe(60000)
+        expect(providers["anthropic"].options.headers["x-plugin-auth"]).toBe("plugin-auth-key")
+        expect(providers["anthropic"].options.headers["anthropic-beta"]).toBeDefined()
+      },
+    })
+  } finally {
+    Plugin.list = originalPluginList
+    Auth.get = originalAuthGet
+  }
 })
 
 // Edge cases for model configuration

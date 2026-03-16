@@ -5,6 +5,8 @@ import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
+import { applyTokenPreflight } from "../../src/session/prompt-budget"
+import { SessionCompaction } from "../../src/session/compaction"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
@@ -207,5 +209,97 @@ describe("session.prompt agent variant", () => {
       if (prev === undefined) delete process.env.OPENAI_API_KEY
       else process.env.OPENAI_API_KEY = prev
     }
+  })
+})
+
+describe("session.prompt token preflight", () => {
+  test("strips old media and tool attachments but keeps latest user media", async () => {
+    const prune = SessionCompaction.emergencyPrune
+    const window = SessionCompaction.slidingWindow
+
+    SessionCompaction.emergencyPrune = async () => 0
+    SessionCompaction.slidingWindow = (msgs) => msgs
+
+    const oldAttachment = {
+      url: `data:image/png;base64,${"a".repeat(6000)}`,
+      mime: "image/png",
+      filename: "old-tool.png",
+    }
+    const oldUserImage = {
+      type: "file",
+      mime: "image/png",
+      url: `data:image/png;base64,${"b".repeat(6000)}`,
+      filename: "old-user.png",
+    }
+    const latestUserImage = {
+      type: "file",
+      mime: "image/png",
+      url: `data:image/png;base64,${"c".repeat(6000)}`,
+      filename: "latest-user.png",
+    }
+
+    const messages = [
+      {
+        info: { role: "user" },
+        parts: [oldUserImage],
+      },
+      {
+        info: { role: "assistant" },
+        parts: [
+          {
+            type: "tool",
+            state: {
+              status: "completed",
+              input: {},
+              output: "ok",
+              attachments: [oldAttachment],
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      },
+      {
+        info: { role: "user" },
+        parts: [latestUserImage],
+      },
+    ] as any
+
+    try {
+      await applyTokenPreflight({
+        model: {
+          limit: { context: 1000, output: 50 },
+        } as any,
+        sessionID: "s_test",
+        system: ["x".repeat(2000)],
+        messages,
+        log: { info() {} },
+        async reload() {
+          return messages
+        },
+      })
+
+      expect(messages[0].parts.length).toBe(0)
+      expect(messages[1].parts[0].state.attachments).toEqual([])
+      expect(typeof messages[1].parts[0].state.time.compacted).toBe("number")
+      expect(messages[2].parts.length).toBe(1)
+      expect(messages[2].parts[0].filename).toBe("latest-user.png")
+    } finally {
+      SessionCompaction.emergencyPrune = prune
+      SessionCompaction.slidingWindow = window
+    }
+  })
+
+  test("structured output tool wiring strips schema marker", () => {
+    const tool = SessionPrompt.createStructuredOutputTool({
+      schema: {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+      },
+      onSuccess: () => {},
+    })
+
+    expect((tool as any).id).toBe("StructuredOutput")
+    expect((tool.inputSchema as any).jsonSchema.$schema).toBeUndefined()
   })
 })
