@@ -1,11 +1,9 @@
 import { Log } from "../util/log"
 import path from "path"
-import { pathToFileURL, fileURLToPath } from "url"
-import { createRequire } from "module"
+import { pathToFileURL } from "url"
 import os from "os"
 import z from "zod"
-import { ModelsDev } from "../provider/models"
-import { mergeDeep, pipe, unique } from "remeda"
+import { mergeDeep, unique } from "remeda"
 import { Global } from "../global"
 import fs from "fs/promises"
 import { lazy } from "../util/lazy"
@@ -13,13 +11,6 @@ import { NamedError } from "@opencode-ai/util/error"
 import { Flag } from "../flag/flag"
 import { Auth } from "../auth"
 import { Env } from "../env"
-import {
-  type ParseError as JsoncParseError,
-  applyEdits,
-  modify,
-  parse as parseJsonc,
-  printParseErrorCode,
-} from "jsonc-parser"
 import { Instance } from "../project/instance"
 import { LSPServer } from "../lsp/server"
 import { BunProc } from "@/bun"
@@ -36,10 +27,35 @@ import { iife } from "@/util/iife"
 import { Account } from "@/account"
 import { ConfigPaths } from "./paths"
 import { Filesystem } from "@/util/filesystem"
+import { deduplicatePlugins as dedupePluginSpecifiers, getPluginName as pluginName, resolvePlugins } from "./plugin"
+import { CONFIG_FILES, mergeFiles, normalizeWellKnownUrl, parseWellKnownConfig, wellKnownSource } from "./source"
+import { applyFlagOverrides, mergeConfigConcatArrays, migrateMode, migrateShare, migrateTools } from "./transform"
+import {
+  globalConfigFile as resolveGlobalConfigFile,
+  parseConfig as parseConfigText,
+  patchJsonc as patchJsoncText,
+} from "./update"
+
+// Schema modules (extracted for maintainability)
+import {
+  McpLocal as McpLocalSchema,
+  McpOAuth as McpOAuthSchema,
+  McpRemote as McpRemoteSchema,
+  Mcp as McpSchema,
+  PermissionAction as PermissionActionSchema,
+  PermissionObject as PermissionObjectSchema,
+  PermissionRule as PermissionRuleSchema,
+  Permission as PermissionSchema,
+  Agent as AgentSchema,
+  Command as CommandSchema,
+  Skills as SkillsSchema,
+  Provider as ProviderSchema,
+  Keybinds as KeybindsSchema,
+  Server as ServerSchema,
+  Layout as LayoutSchema,
+} from "./schema"
 
 export namespace Config {
-  const ModelId = z.string().meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
-
   const log = Log.create({ service: "config" })
 
   // Managed settings directory for enterprise deployments (highest priority, admin-controlled)
@@ -61,16 +77,40 @@ export namespace Config {
 
   const managedDir = managedConfigDir()
 
-  // Custom merge function that concatenates array fields instead of replacing them
-  function mergeConfigConcatArrays(target: Info, source: Info): Info {
-    const merged = mergeDeep(target, source)
-    if (target.plugin && source.plugin) {
-      merged.plugin = Array.from(new Set([...target.plugin, ...source.plugin]))
-    }
-    if (target.instructions && source.instructions) {
-      merged.instructions = Array.from(new Set([...target.instructions, ...source.instructions]))
-    }
-    return merged
+  export const McpLocal = McpLocalSchema
+  export const McpOAuth = McpOAuthSchema
+  export const McpRemote = McpRemoteSchema
+  export const Mcp = McpSchema
+  export const PermissionAction = PermissionActionSchema
+  export const PermissionObject = PermissionObjectSchema
+  export const PermissionRule = PermissionRuleSchema
+  export const Permission = PermissionSchema
+  export const Agent = AgentSchema
+  export const Command = CommandSchema
+  export const Skills = SkillsSchema
+  export const Provider = ProviderSchema
+  export const Keybinds = KeybindsSchema
+  export const Server = ServerSchema
+  export const Layout = LayoutSchema
+
+  export type McpOAuth = z.infer<typeof McpOAuth>
+  export type Mcp = z.infer<typeof Mcp>
+  export type PermissionAction = z.infer<typeof PermissionAction>
+  export type PermissionObject = z.infer<typeof PermissionObject>
+  export type PermissionRule = z.infer<typeof PermissionRule>
+  export type Permission = z.infer<typeof Permission>
+  export type Agent = z.infer<typeof Agent>
+  export type Command = z.infer<typeof Command>
+  export type Skills = z.infer<typeof Skills>
+  export type Provider = z.infer<typeof Provider>
+  export type Layout = z.infer<typeof Layout>
+
+  export function getPluginName(plugin: string): string {
+    return pluginName(plugin)
+  }
+
+  export function deduplicatePlugins(plugins: string[]): string[] {
+    return dedupePluginSpecifiers(plugins)
   }
 
   export const state = Instance.state(async () => {
@@ -87,22 +127,22 @@ export namespace Config {
     let result: Info = {}
     for (const [key, value] of Object.entries(auth)) {
       if (value.type === "wellknown") {
-        const url = key.replace(/\/+$/, "")
+        const url = normalizeWellKnownUrl(key)
+        const source = wellKnownSource(url)
         process.env[value.key] = value.token
-        log.debug("fetching remote config", { url: `${url}/.well-known/opencode` })
-        const response = await fetch(`${url}/.well-known/opencode`)
+        log.debug("fetching remote config", { url: source })
+        const response = await fetch(source)
         if (!response.ok) {
           throw new Error(`failed to fetch remote config from ${url}: ${response.status}`)
         }
-        const wellknown = (await response.json()) as any
-        const remoteConfig = wellknown.config ?? {}
+        const remoteConfig = parseWellKnownConfig(await response.json())
         // Add $schema to prevent load() from trying to write back to a non-existent file
         if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
         result = mergeConfigConcatArrays(
           result,
           await load(JSON.stringify(remoteConfig), {
-            dir: path.dirname(`${url}/.well-known/opencode`),
-            source: `${url}/.well-known/opencode`,
+            dir: path.dirname(source),
+            source,
           }),
         )
         log.debug("loaded remote config from well-known", { url })
@@ -206,53 +246,30 @@ export namespace Config {
     // which would fail on system directories requiring elevated permissions
     // This way it only loads config file and not skills/plugins/commands
     if (existsSync(managedDir)) {
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
+      for (const file of CONFIG_FILES) {
         result = mergeConfigConcatArrays(result, await loadFile(path.join(managedDir, file)))
       }
     }
 
     // Migrate deprecated mode field to agent field
-    for (const [name, mode] of Object.entries(result.mode ?? {})) {
-      result.agent = mergeDeep(result.agent ?? {}, {
-        [name]: {
-          ...mode,
-          mode: "primary" as const,
-        },
-      })
-    }
+    result = migrateMode(result)
 
     if (Flag.OPENCODE_PERMISSION) {
       result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
     }
 
-    // Backwards compatibility: legacy top-level `tools` config
-    if (result.tools) {
-      const perms: Record<string, Config.PermissionAction> = {}
-      for (const [tool, enabled] of Object.entries(result.tools)) {
-        const action: Config.PermissionAction = enabled ? "allow" : "deny"
-        if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
-          perms.edit = action
-          continue
-        }
-        perms[tool] = action
-      }
-      result.permission = mergeDeep(perms, result.permission ?? {})
-    }
+    result = migrateTools(result)
 
     if (!result.username) result.username = os.userInfo().username
 
     // Handle migration from autoshare to share field
-    if (result.autoshare === true && !result.share) {
-      result.share = "auto"
-    }
+    result = migrateShare(result)
 
     // Apply flag overrides for compaction settings
-    if (Flag.OPENCODE_DISABLE_AUTOCOMPACT) {
-      result.compaction = { ...result.compaction, auto: false }
-    }
-    if (Flag.OPENCODE_DISABLE_PRUNE) {
-      result.compaction = { ...result.compaction, prune: false }
-    }
+    result = applyFlagOverrides(result, {
+      disableAutocompact: Flag.OPENCODE_DISABLE_AUTOCOMPACT,
+      disablePrune: Flag.OPENCODE_DISABLE_PRUNE,
+    })
 
     result.plugin = deduplicatePlugins(result.plugin ?? [])
 
@@ -485,534 +502,6 @@ export namespace Config {
     return plugins
   }
 
-  /**
-   * Extracts a canonical plugin name from a plugin specifier.
-   * - For file:// URLs: extracts filename without extension
-   * - For npm packages: extracts package name without version
-   *
-   * @example
-   * getPluginName("file:///path/to/plugin/foo.js") // "foo"
-   * getPluginName("oh-my-opencode@2.4.3") // "oh-my-opencode"
-   * getPluginName("@scope/pkg@1.0.0") // "@scope/pkg"
-   */
-  export function getPluginName(plugin: string): string {
-    if (plugin.startsWith("file://")) {
-      return path.parse(new URL(plugin).pathname).name
-    }
-    const lastAt = plugin.lastIndexOf("@")
-    if (lastAt > 0) {
-      return plugin.substring(0, lastAt)
-    }
-    return plugin
-  }
-
-  /**
-   * Deduplicates plugins by name, with later entries (higher priority) winning.
-   * Priority order (highest to lowest):
-   * 1. Local plugin/ directory
-   * 2. Local opencode.json
-   * 3. Global plugin/ directory
-   * 4. Global opencode.json
-   *
-   * Since plugins are added in low-to-high priority order,
-   * we reverse, deduplicate (keeping first occurrence), then restore order.
-   */
-  export function deduplicatePlugins(plugins: string[]): string[] {
-    // seenNames: canonical plugin names for duplicate detection
-    // e.g., "oh-my-opencode", "@scope/pkg"
-    const seenNames = new Set<string>()
-
-    // uniqueSpecifiers: full plugin specifiers to return
-    // e.g., "oh-my-opencode@2.4.3", "file:///path/to/plugin.js"
-    const uniqueSpecifiers: string[] = []
-
-    for (const specifier of plugins.toReversed()) {
-      const name = getPluginName(specifier)
-      if (!seenNames.has(name)) {
-        seenNames.add(name)
-        uniqueSpecifiers.push(specifier)
-      }
-    }
-
-    return uniqueSpecifiers.toReversed()
-  }
-
-  export const McpLocal = z
-    .object({
-      type: z.literal("local").describe("Type of MCP server connection"),
-      command: z.string().array().describe("Command and arguments to run the MCP server"),
-      environment: z
-        .record(z.string(), z.string())
-        .optional()
-        .describe("Environment variables to set when running the MCP server"),
-      enabled: z.boolean().optional().describe("Enable or disable the MCP server on startup"),
-      timeout: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
-    })
-    .strict()
-    .meta({
-      ref: "McpLocalConfig",
-    })
-
-  export const McpOAuth = z
-    .object({
-      clientId: z
-        .string()
-        .optional()
-        .describe("OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted."),
-      clientSecret: z.string().optional().describe("OAuth client secret (if required by the authorization server)"),
-      scope: z.string().optional().describe("OAuth scopes to request during authorization"),
-    })
-    .strict()
-    .meta({
-      ref: "McpOAuthConfig",
-    })
-  export type McpOAuth = z.infer<typeof McpOAuth>
-
-  export const McpRemote = z
-    .object({
-      type: z.literal("remote").describe("Type of MCP server connection"),
-      url: z.string().describe("URL of the remote MCP server"),
-      enabled: z.boolean().optional().describe("Enable or disable the MCP server on startup"),
-      headers: z.record(z.string(), z.string()).optional().describe("Headers to send with the request"),
-      oauth: z
-        .union([McpOAuth, z.literal(false)])
-        .optional()
-        .describe(
-          "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.",
-        ),
-      timeout: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
-    })
-    .strict()
-    .meta({
-      ref: "McpRemoteConfig",
-    })
-
-  export const Mcp = z.discriminatedUnion("type", [McpLocal, McpRemote])
-  export type Mcp = z.infer<typeof Mcp>
-
-  export const PermissionAction = z.enum(["ask", "allow", "deny"]).meta({
-    ref: "PermissionActionConfig",
-  })
-  export type PermissionAction = z.infer<typeof PermissionAction>
-
-  export const PermissionObject = z.record(z.string(), PermissionAction).meta({
-    ref: "PermissionObjectConfig",
-  })
-  export type PermissionObject = z.infer<typeof PermissionObject>
-
-  export const PermissionRule = z.union([PermissionAction, PermissionObject]).meta({
-    ref: "PermissionRuleConfig",
-  })
-  export type PermissionRule = z.infer<typeof PermissionRule>
-
-  // Capture original key order before zod reorders, then rebuild in original order
-  const permissionPreprocess = (val: unknown) => {
-    if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-      return { __originalKeys: Object.keys(val), ...val }
-    }
-    return val
-  }
-
-  const permissionTransform = (x: unknown): Record<string, PermissionRule> => {
-    if (typeof x === "string") return { "*": x as PermissionAction }
-    const obj = x as { __originalKeys?: string[] } & Record<string, unknown>
-    const { __originalKeys, ...rest } = obj
-    if (!__originalKeys) return rest as Record<string, PermissionRule>
-    const result: Record<string, PermissionRule> = {}
-    for (const key of __originalKeys) {
-      if (key in rest) result[key] = rest[key] as PermissionRule
-    }
-    return result
-  }
-
-  export const Permission = z
-    .preprocess(
-      permissionPreprocess,
-      z
-        .object({
-          __originalKeys: z.string().array().optional(),
-          read: PermissionRule.optional(),
-          edit: PermissionRule.optional(),
-          glob: PermissionRule.optional(),
-          grep: PermissionRule.optional(),
-          list: PermissionRule.optional(),
-          bash: PermissionRule.optional(),
-          task: PermissionRule.optional(),
-          external_directory: PermissionRule.optional(),
-          todowrite: PermissionAction.optional(),
-          todoread: PermissionAction.optional(),
-          question: PermissionAction.optional(),
-          webfetch: PermissionAction.optional(),
-          websearch: PermissionAction.optional(),
-          codesearch: PermissionAction.optional(),
-          lsp: PermissionRule.optional(),
-          doom_loop: PermissionAction.optional(),
-          skill: PermissionRule.optional(),
-        })
-        .catchall(PermissionRule)
-        .or(PermissionAction),
-    )
-    .transform(permissionTransform)
-    .meta({
-      ref: "PermissionConfig",
-    })
-  export type Permission = z.infer<typeof Permission>
-
-  export const Command = z.object({
-    template: z.string(),
-    description: z.string().optional(),
-    agent: z.string().optional(),
-    model: ModelId.optional(),
-    subtask: z.boolean().optional(),
-  })
-  export type Command = z.infer<typeof Command>
-
-  export const Skills = z.object({
-    paths: z.array(z.string()).optional().describe("Additional paths to skill folders"),
-    urls: z
-      .array(z.string())
-      .optional()
-      .describe("URLs to fetch skills from (e.g., https://example.com/.well-known/skills/)"),
-  })
-  export type Skills = z.infer<typeof Skills>
-
-  export const Agent = z
-    .object({
-      model: ModelId.optional(),
-      variant: z
-        .string()
-        .optional()
-        .describe("Default model variant for this agent (applies only when using the agent's configured model)."),
-      temperature: z.number().optional(),
-      top_p: z.number().optional(),
-      prompt: z.string().optional(),
-      tools: z.record(z.string(), z.boolean()).optional().describe("@deprecated Use 'permission' field instead"),
-      disable: z.boolean().optional(),
-      description: z.string().optional().describe("Description of when to use the agent"),
-      mode: z.enum(["subagent", "primary", "all"]).optional(),
-      hidden: z
-        .boolean()
-        .optional()
-        .describe("Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)"),
-      options: z.record(z.string(), z.any()).optional(),
-      color: z
-        .union([
-          z.string().regex(/^#[0-9a-fA-F]{6}$/, "Invalid hex color format"),
-          z.enum(["primary", "secondary", "accent", "success", "warning", "error", "info"]),
-        ])
-        .optional()
-        .describe("Hex color code (e.g., #FF5733) or theme color (e.g., primary)"),
-      steps: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Maximum number of agentic iterations before forcing text-only response"),
-      maxSteps: z.number().int().positive().optional().describe("@deprecated Use 'steps' field instead."),
-      permission: Permission.optional(),
-    })
-    .catchall(z.any())
-    .transform((agent, ctx) => {
-      const knownKeys = new Set([
-        "name",
-        "model",
-        "variant",
-        "prompt",
-        "description",
-        "temperature",
-        "top_p",
-        "mode",
-        "hidden",
-        "color",
-        "steps",
-        "maxSteps",
-        "options",
-        "permission",
-        "disable",
-        "tools",
-      ])
-
-      // Extract unknown properties into options
-      const options: Record<string, unknown> = { ...agent.options }
-      for (const [key, value] of Object.entries(agent)) {
-        if (!knownKeys.has(key)) options[key] = value
-      }
-
-      // Convert legacy tools config to permissions
-      const permission: Permission = {}
-      for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
-        const action = enabled ? "allow" : "deny"
-        // write, edit, patch, multiedit all map to edit permission
-        if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
-          permission.edit = action
-        } else {
-          permission[tool] = action
-        }
-      }
-      Object.assign(permission, agent.permission)
-
-      // Convert legacy maxSteps to steps
-      const steps = agent.steps ?? agent.maxSteps
-
-      return { ...agent, options, permission, steps } as typeof agent & {
-        options?: Record<string, unknown>
-        permission?: Permission
-        steps?: number
-      }
-    })
-    .meta({
-      ref: "AgentConfig",
-    })
-  export type Agent = z.infer<typeof Agent>
-
-  export const Keybinds = z
-    .object({
-      leader: z.string().optional().default("ctrl+x").describe("Leader key for keybind combinations"),
-      app_exit: z.string().optional().default("ctrl+c,ctrl+d,<leader>q").describe("Exit the application"),
-      editor_open: z.string().optional().default("<leader>e").describe("Open external editor"),
-      theme_list: z.string().optional().default("<leader>t").describe("List available themes"),
-      sidebar_toggle: z.string().optional().default("<leader>b").describe("Toggle sidebar"),
-      scrollbar_toggle: z.string().optional().default("none").describe("Toggle session scrollbar"),
-      username_toggle: z.string().optional().default("none").describe("Toggle username visibility"),
-      status_view: z.string().optional().default("<leader>s").describe("View status"),
-      session_export: z.string().optional().default("<leader>x").describe("Export session to editor"),
-      session_new: z.string().optional().default("<leader>n").describe("Create a new session"),
-      session_list: z.string().optional().default("<leader>l").describe("List all sessions"),
-      session_timeline: z.string().optional().default("<leader>g").describe("Show session timeline"),
-      session_fork: z.string().optional().default("none").describe("Fork session from message"),
-      session_rename: z.string().optional().default("ctrl+r").describe("Rename session"),
-      session_delete: z.string().optional().default("ctrl+d").describe("Delete session"),
-      stash_delete: z.string().optional().default("ctrl+d").describe("Delete stash entry"),
-      model_provider_list: z.string().optional().default("ctrl+a").describe("Open provider list from model dialog"),
-      model_favorite_toggle: z.string().optional().default("ctrl+f").describe("Toggle model favorite status"),
-      session_share: z.string().optional().default("none").describe("Share current session"),
-      session_unshare: z.string().optional().default("none").describe("Unshare current session"),
-      session_interrupt: z.string().optional().default("escape").describe("Interrupt current session"),
-      session_compact: z.string().optional().default("<leader>c").describe("Compact the session"),
-      messages_page_up: z.string().optional().default("pageup,ctrl+alt+b").describe("Scroll messages up by one page"),
-      messages_page_down: z
-        .string()
-        .optional()
-        .default("pagedown,ctrl+alt+f")
-        .describe("Scroll messages down by one page"),
-      messages_line_up: z.string().optional().default("ctrl+alt+y").describe("Scroll messages up by one line"),
-      messages_line_down: z.string().optional().default("ctrl+alt+e").describe("Scroll messages down by one line"),
-      messages_half_page_up: z.string().optional().default("ctrl+alt+u").describe("Scroll messages up by half page"),
-      messages_half_page_down: z
-        .string()
-        .optional()
-        .default("ctrl+alt+d")
-        .describe("Scroll messages down by half page"),
-      messages_first: z.string().optional().default("ctrl+g,home").describe("Navigate to first message"),
-      messages_last: z.string().optional().default("ctrl+alt+g,end").describe("Navigate to last message"),
-      messages_next: z.string().optional().default("none").describe("Navigate to next message"),
-      messages_previous: z.string().optional().default("none").describe("Navigate to previous message"),
-      messages_last_user: z.string().optional().default("none").describe("Navigate to last user message"),
-      messages_copy: z.string().optional().default("<leader>y").describe("Copy message"),
-      messages_undo: z.string().optional().default("<leader>u").describe("Undo message"),
-      messages_redo: z.string().optional().default("<leader>r").describe("Redo message"),
-      messages_toggle_conceal: z
-        .string()
-        .optional()
-        .default("<leader>h")
-        .describe("Toggle code block concealment in messages"),
-      tool_details: z.string().optional().default("none").describe("Toggle tool details visibility"),
-      model_list: z.string().optional().default("<leader>m").describe("List available models"),
-      model_cycle_recent: z.string().optional().default("f2").describe("Next recently used model"),
-      model_cycle_recent_reverse: z.string().optional().default("shift+f2").describe("Previous recently used model"),
-      model_cycle_favorite: z.string().optional().default("none").describe("Next favorite model"),
-      model_cycle_favorite_reverse: z.string().optional().default("none").describe("Previous favorite model"),
-      command_list: z.string().optional().default("ctrl+p").describe("List available commands"),
-      agent_list: z.string().optional().default("<leader>a").describe("List agents"),
-      agent_cycle: z.string().optional().default("tab").describe("Next agent"),
-      agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
-      variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
-      input_clear: z.string().optional().default("ctrl+c").describe("Clear input field"),
-      input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
-      input_submit: z.string().optional().default("return").describe("Submit input"),
-      input_newline: z
-        .string()
-        .optional()
-        .default("shift+return,ctrl+return,alt+return,ctrl+j")
-        .describe("Insert newline in input"),
-      input_move_left: z.string().optional().default("left,ctrl+b").describe("Move cursor left in input"),
-      input_move_right: z.string().optional().default("right,ctrl+f").describe("Move cursor right in input"),
-      input_move_up: z.string().optional().default("up").describe("Move cursor up in input"),
-      input_move_down: z.string().optional().default("down").describe("Move cursor down in input"),
-      input_select_left: z.string().optional().default("shift+left").describe("Select left in input"),
-      input_select_right: z.string().optional().default("shift+right").describe("Select right in input"),
-      input_select_up: z.string().optional().default("shift+up").describe("Select up in input"),
-      input_select_down: z.string().optional().default("shift+down").describe("Select down in input"),
-      input_line_home: z.string().optional().default("ctrl+a").describe("Move to start of line in input"),
-      input_line_end: z.string().optional().default("ctrl+e").describe("Move to end of line in input"),
-      input_select_line_home: z
-        .string()
-        .optional()
-        .default("ctrl+shift+a")
-        .describe("Select to start of line in input"),
-      input_select_line_end: z.string().optional().default("ctrl+shift+e").describe("Select to end of line in input"),
-      input_visual_line_home: z.string().optional().default("alt+a").describe("Move to start of visual line in input"),
-      input_visual_line_end: z.string().optional().default("alt+e").describe("Move to end of visual line in input"),
-      input_select_visual_line_home: z
-        .string()
-        .optional()
-        .default("alt+shift+a")
-        .describe("Select to start of visual line in input"),
-      input_select_visual_line_end: z
-        .string()
-        .optional()
-        .default("alt+shift+e")
-        .describe("Select to end of visual line in input"),
-      input_buffer_home: z.string().optional().default("home").describe("Move to start of buffer in input"),
-      input_buffer_end: z.string().optional().default("end").describe("Move to end of buffer in input"),
-      input_select_buffer_home: z
-        .string()
-        .optional()
-        .default("shift+home")
-        .describe("Select to start of buffer in input"),
-      input_select_buffer_end: z.string().optional().default("shift+end").describe("Select to end of buffer in input"),
-      input_delete_line: z.string().optional().default("ctrl+shift+d").describe("Delete line in input"),
-      input_delete_to_line_end: z.string().optional().default("ctrl+k").describe("Delete to end of line in input"),
-      input_delete_to_line_start: z.string().optional().default("ctrl+u").describe("Delete to start of line in input"),
-      input_backspace: z.string().optional().default("backspace,shift+backspace").describe("Backspace in input"),
-      input_delete: z.string().optional().default("ctrl+d,delete,shift+delete").describe("Delete character in input"),
-      input_undo: z.string().optional().default("ctrl+-,super+z").describe("Undo in input"),
-      input_redo: z.string().optional().default("ctrl+.,super+shift+z").describe("Redo in input"),
-      input_word_forward: z
-        .string()
-        .optional()
-        .default("alt+f,alt+right,ctrl+right")
-        .describe("Move word forward in input"),
-      input_word_backward: z
-        .string()
-        .optional()
-        .default("alt+b,alt+left,ctrl+left")
-        .describe("Move word backward in input"),
-      input_select_word_forward: z
-        .string()
-        .optional()
-        .default("alt+shift+f,alt+shift+right")
-        .describe("Select word forward in input"),
-      input_select_word_backward: z
-        .string()
-        .optional()
-        .default("alt+shift+b,alt+shift+left")
-        .describe("Select word backward in input"),
-      input_delete_word_forward: z
-        .string()
-        .optional()
-        .default("alt+d,alt+delete,ctrl+delete")
-        .describe("Delete word forward in input"),
-      input_delete_word_backward: z
-        .string()
-        .optional()
-        .default("ctrl+w,ctrl+backspace,alt+backspace")
-        .describe("Delete word backward in input"),
-      history_previous: z.string().optional().default("up").describe("Previous history item"),
-      history_next: z.string().optional().default("down").describe("Next history item"),
-      session_child_first: z.string().optional().default("<leader>down").describe("Go to first child session"),
-      session_child_cycle: z.string().optional().default("right").describe("Go to next child session"),
-      session_child_cycle_reverse: z.string().optional().default("left").describe("Go to previous child session"),
-      session_parent: z.string().optional().default("up").describe("Go to parent session"),
-      terminal_suspend: z.string().optional().default("ctrl+z").describe("Suspend terminal"),
-      terminal_title_toggle: z.string().optional().default("none").describe("Toggle terminal title"),
-      tips_toggle: z.string().optional().default("<leader>h").describe("Toggle tips on home screen"),
-      display_thinking: z.string().optional().default("none").describe("Toggle thinking blocks visibility"),
-    })
-    .strict()
-    .meta({
-      ref: "KeybindsConfig",
-    })
-
-  export const Server = z
-    .object({
-      port: z.number().int().positive().optional().describe("Port to listen on"),
-      hostname: z.string().optional().describe("Hostname to listen on"),
-      mdns: z.boolean().optional().describe("Enable mDNS service discovery"),
-      mdnsDomain: z.string().optional().describe("Custom domain name for mDNS service (default: opencode.local)"),
-      cors: z.array(z.string()).optional().describe("Additional domains to allow for CORS"),
-    })
-    .strict()
-    .meta({
-      ref: "ServerConfig",
-    })
-
-  export const Layout = z.enum(["auto", "stretch"]).meta({
-    ref: "LayoutConfig",
-  })
-  export type Layout = z.infer<typeof Layout>
-
-  export const Provider = ModelsDev.Provider.partial()
-    .extend({
-      whitelist: z.array(z.string()).optional(),
-      blacklist: z.array(z.string()).optional(),
-      models: z
-        .record(
-          z.string(),
-          ModelsDev.Model.partial().extend({
-            variants: z
-              .record(
-                z.string(),
-                z
-                  .object({
-                    disabled: z.boolean().optional().describe("Disable this variant for the model"),
-                  })
-                  .catchall(z.any()),
-              )
-              .optional()
-              .describe("Variant-specific configuration"),
-          }),
-        )
-        .optional(),
-      options: z
-        .object({
-          apiKey: z.string().optional(),
-          baseURL: z.string().optional(),
-          enterpriseUrl: z.string().optional().describe("GitHub Enterprise URL for copilot authentication"),
-          setCacheKey: z.boolean().optional().describe("Enable promptCacheKey for this provider (default false)"),
-          timeout: z
-            .union([
-              z
-                .number()
-                .int()
-                .positive()
-                .describe(
-                  "Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.",
-                ),
-              z.literal(false).describe("Disable timeout for this provider entirely."),
-            ])
-            .optional()
-            .describe(
-              "Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.",
-            ),
-          chunkTimeout: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe(
-              "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
-            ),
-        })
-        .catchall(z.any())
-        .optional(),
-    })
-    .strict()
-    .meta({
-      ref: "ProviderConfig",
-    })
-  export type Provider = z.infer<typeof Provider>
-
   export const Info = z
     .object({
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
@@ -1051,10 +540,16 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("When set, ONLY these providers will be enabled. All other providers will be ignored"),
-      model: ModelId.describe("Model to use in the format of provider/model, eg anthropic/claude-2").optional(),
-      small_model: ModelId.describe(
-        "Small model to use for tasks like title generation in the format of provider/model",
-      ).optional(),
+      model: z
+        .string()
+        .meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
+        .describe("Model to use in the format of provider/model, eg anthropic/claude-2")
+        .optional(),
+      small_model: z
+        .string()
+        .meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
+        .describe("Small model to use for tasks like title generation in the format of provider/model")
+        .optional(),
       default_agent: z
         .string()
         .optional()
@@ -1209,7 +704,11 @@ export namespace Config {
                 .optional()
                 .describe("Maximum loop iterations before forced stop (default: 50)"),
               prompt: z.string().optional().describe("System prompt injection when mode is active"),
-              model: ModelId.optional().describe("Override model for this mode"),
+              model: z
+                .string()
+                .meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
+                .optional()
+                .describe("Override model for this mode"),
               tools: z
                 .record(z.string(), z.boolean())
                 .optional()
@@ -1300,11 +799,11 @@ export namespace Config {
   export type Info = z.output<typeof Info>
 
   export const global = lazy(async () => {
-    let result: Info = pipe(
+    let result: Info = await mergeFiles(
       {},
-      mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
+      ["config.json", ...CONFIG_FILES].map((file) => path.join(Global.Path.config, file)),
+      loadFile,
+      mergeDeep,
     )
 
     const legacy = path.join(Global.Path.config, "config")
@@ -1367,21 +866,7 @@ export namespace Config {
       }
       const data = parsed.data
       if (data.plugin && isFile) {
-        for (let i = 0; i < data.plugin.length; i++) {
-          const plugin = data.plugin[i]
-          try {
-            data.plugin[i] = import.meta.resolve!(plugin, options.path)
-          } catch (e) {
-            try {
-              // import.meta.resolve sometimes fails with newly created node_modules
-              const require = createRequire(options.path)
-              const resolvedPath = require.resolve(plugin)
-              data.plugin[i] = pathToFileURL(resolvedPath).href
-            } catch {
-              // Ignore, plugin might be a generic string identifier like "mcp-server"
-            }
-          }
-        }
+        data.plugin = await resolvePlugins(data.plugin, options.path)
       }
       return data
     }
@@ -1417,88 +902,40 @@ export namespace Config {
     await Instance.dispose()
   }
 
-  function globalConfigFile() {
-    const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
-      path.join(Global.Path.config, file),
-    )
-    for (const file of candidates) {
-      if (existsSync(file)) return file
-    }
-    return candidates[0]
-  }
-
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return !!value && typeof value === "object" && !Array.isArray(value)
-  }
-
-  function patchJsonc(input: string, patch: unknown, path: string[] = []): string {
-    if (!isRecord(patch)) {
-      const edits = modify(input, path, patch, {
-        formattingOptions: {
-          insertSpaces: true,
-          tabSize: 2,
-        },
-      })
-      return applyEdits(input, edits)
-    }
-
-    return Object.entries(patch).reduce((result, [key, value]) => {
-      if (value === undefined) return result
-      return patchJsonc(result, value, [...path, key])
-    }, input)
-  }
-
-  function parseConfig(text: string, filepath: string): Info {
-    const errors: JsoncParseError[] = []
-    const data = parseJsonc(text, errors, { allowTrailingComma: true })
-    if (errors.length) {
-      const lines = text.split("\n")
-      const errorDetails = errors
-        .map((e) => {
-          const beforeOffset = text.substring(0, e.offset).split("\n")
-          const line = beforeOffset.length
-          const column = beforeOffset[beforeOffset.length - 1].length + 1
-          const problemLine = lines[line - 1]
-
-          const error = `${printParseErrorCode(e.error)} at line ${line}, column ${column}`
-          if (!problemLine) return error
-
-          return `${error}\n   Line ${line}: ${problemLine}\n${"".padStart(column + 9)}^`
-        })
-        .join("\n")
-
-      throw new JsonError({
-        path: filepath,
-        message: `\n--- JSONC Input ---\n${text}\n--- Errors ---\n${errorDetails}\n--- End ---`,
-      })
-    }
-
-    const parsed = Info.safeParse(data)
-    if (parsed.success) return parsed.data
-
-    throw new InvalidError({
-      path: filepath,
-      issues: parsed.error.issues,
-    })
-  }
-
   export async function updateGlobal(config: Info) {
-    const filepath = globalConfigFile()
+    const filepath = resolveGlobalConfigFile(Global.Path.config, existsSync)
     const before = await Filesystem.readText(filepath).catch((err: any) => {
       if (err.code === "ENOENT") return "{}"
       throw new JsonError({ path: filepath }, { cause: err })
     })
 
+    const parse = (text: string) =>
+      parseConfigText(
+        text,
+        filepath,
+        (data) => {
+          const parsed = Info.safeParse(data)
+          if (parsed.success) return parsed.data
+          throw new InvalidError({
+            path: filepath,
+            issues: parsed.error.issues,
+          })
+        },
+        (data) => {
+          throw new JsonError(data)
+        },
+      ) as Info
+
     const next = await (async () => {
       if (!filepath.endsWith(".jsonc")) {
-        const existing = parseConfig(before, filepath)
+        const existing = parse(before)
         const merged = mergeDeep(existing, config)
         await Filesystem.writeJson(filepath, merged)
         return merged
       }
 
-      const updated = patchJsonc(before, config)
-      const merged = parseConfig(updated, filepath)
+      const updated = patchJsoncText(before, config)
+      const merged = parse(updated)
       await Filesystem.write(filepath, updated)
       return merged
     })()
@@ -1524,5 +961,3 @@ export namespace Config {
     return state().then((x) => x.directories)
   }
 }
-Filesystem.write
-Filesystem.write
