@@ -46,6 +46,7 @@ import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
 import { Mode } from "@/mode"
+import { Intent } from "@/intent"
 import { LoopController } from "@/loop"
 import {
   createStructuredOutputTool as createStructuredOutputToolInner,
@@ -696,6 +697,21 @@ export namespace SessionPrompt {
         const activeMode = await Mode.get(activeModeName)
         if (activeMode?.prompt) {
           system.push(activeMode.prompt)
+        }
+      }
+
+      // === INTENT DETECTION ===
+      // If no explicit mode is active, detect intent from user message and inject context hints.
+      // This helps the model respond appropriately without requiring explicit mode keywords.
+      if (!activeModeName && lastUserMsg) {
+        const userText = lastUserMsg.parts
+          .filter((p): p is MessageV2.TextPart => p.type === "text")
+          .map((p) => p.text)
+          .join(" ")
+        const { detection, augmentation } = Intent.process(userText)
+        if (augmentation && detection.confidence >= 0.4) {
+          system.push(augmentation)
+          log.info("intent detected", { intent: detection.intent, confidence: detection.confidence, sessionID })
         }
       }
 
