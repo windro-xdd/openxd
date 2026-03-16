@@ -142,7 +142,10 @@ export const ReadTool = Tool.define("read", {
     }
 
     const isBinary = await isBinaryFile(filepath, Number(stat.size))
-    if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
+    if (isBinary)
+      throw new Error(
+        `Cannot read binary file: ${filepath}. Use bash with 'file', 'xxd', or 'strings' to inspect binary files.`,
+      )
 
     const stream = createReadStream(filepath, { encoding: "utf8" })
     const rl = createInterface({

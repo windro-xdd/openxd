@@ -9,7 +9,7 @@ import { Bus } from "@/bus"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { Plugin } from "@/plugin"
-import type { Provider } from "@/provider/provider"
+import { Provider } from "@/provider/provider"
 import { LLM } from "./llm"
 import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
@@ -366,6 +366,37 @@ export namespace SessionProcessor {
               const retry = SessionRetry.retryable(error)
               if (retry !== undefined) {
                 attempt++
+
+                // Rate limit fallback — cycle to next model instead of sleeping
+                if (SessionRetry.isRateLimit(error)) {
+                  const cfg = await Config.get()
+                  const fallback = cfg.rateLimitFallback
+                  if (fallback?.enabled && fallback.models?.length) {
+                    const models = fallback.models
+                    const cur = streamInput.model.id
+                    const idx = models.indexOf(cur)
+                    const nextID = idx === -1 || idx === models.length - 1 ? models[0] : models[idx + 1]
+                    if (nextID && nextID !== cur) {
+                      // model IDs in config are "providerID/modelID"
+                      const slash = nextID.indexOf("/")
+                      const providerID = slash === -1 ? nextID : nextID.slice(0, slash)
+                      const modelID = slash === -1 ? nextID : nextID.slice(slash + 1)
+                      const next = await Provider.getModel(providerID, modelID).catch(() => undefined)
+                      if (next) {
+                        log.info("rate-limit-fallback", { from: cur, to: nextID })
+                        streamInput.model = next
+                        SessionStatus.set(input.sessionID, {
+                          type: "retry",
+                          attempt,
+                          message: `Rate limited on ${cur} — switching to ${nextID}`,
+                          next: Date.now(),
+                        })
+                        continue
+                      }
+                    }
+                  }
+                }
+
                 const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
                 SessionStatus.set(input.sessionID, {
                   type: "retry",

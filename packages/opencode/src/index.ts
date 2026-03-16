@@ -28,8 +28,10 @@ import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
+import { BootCommand } from "./cli/cmd/boot"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+import { FallbackCommand } from "./cli/cmd/fallback"
 import { DbCommand } from "./cli/cmd/db"
 import path from "path"
 import { Global } from "./global"
@@ -154,7 +156,9 @@ let cli = yargs(hideBin(process.argv))
   .command(GithubCommand)
   .command(PrCommand)
   .command(SessionCommand)
+  .command(BootCommand)
   .command(DbCommand)
+  .command(FallbackCommand)
 
 if (Installation.isLocal()) {
   cli = cli.command(WorkspaceServeCommand)

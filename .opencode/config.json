@@ -1,0 +1,18 @@
+{
+  "telegram": {
+    "botToken": "8337969780:AAG3GqfseS0FDHNOK2QDtNkhnglYeQVks_M",
+    "allowedUsers": []
+  },
+  "daemon": {
+    "heartbeat": {
+      "enabled": false,
+      "intervalMinutes": 30
+    }
+  },
+  "browser": {
+    "relay": {
+      "enabled": true,
+      "port": 4097
+    }
+  }
+}

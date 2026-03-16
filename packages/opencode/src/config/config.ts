@@ -1166,6 +1166,18 @@ export namespace Config {
           url: z.string().optional().describe("Enterprise URL"),
         })
         .optional(),
+      rateLimitFallback: z
+        .object({
+          enabled: z.boolean().optional().describe("Enable automatic model cycling when rate limited (default: false)"),
+          models: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Ordered list of model IDs to cycle through when rate limited. e.g. ['github-copilot/gpt-4.1', 'github-copilot/o4-mini']. When the active model is rate limited, the next model in the list is used. Cycles back to the primary model when rate limit clears.",
+            ),
+        })
+        .optional()
+        .describe("Automatically switch models when rate limited — useful for long unattended runs"),
       compaction: z
         .object({
           auto: z.boolean().optional().describe("Enable automatic compaction when context is full (default: true)"),
@@ -1178,6 +1190,35 @@ export namespace Config {
             .describe("Token buffer for compaction. Leaves enough window to avoid overflow during compaction."),
         })
         .optional(),
+      modes: z
+        .record(
+          z.string(),
+          z
+            .object({
+              description: z.string().optional().describe("Description of this mode"),
+              loop: z.boolean().optional().describe("Enable autonomous loop (default: false)"),
+              readOnly: z
+                .boolean()
+                .optional()
+                .describe("Disable write/edit tools — read-only exploration (default: false)"),
+              maxIterations: z
+                .number()
+                .int()
+                .min(1)
+                .max(200)
+                .optional()
+                .describe("Maximum loop iterations before forced stop (default: 50)"),
+              prompt: z.string().optional().describe("System prompt injection when mode is active"),
+              model: ModelId.optional().describe("Override model for this mode"),
+              tools: z
+                .record(z.string(), z.boolean())
+                .optional()
+                .describe("Override specific tool permissions (tool name → enabled)"),
+            })
+            .describe("Mode configuration"),
+        )
+        .optional()
+        .describe("Custom modes — keyword-triggered session configurations (ultrawork, search, analyze, plan)"),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
@@ -1235,20 +1276,21 @@ export namespace Config {
         .describe("Daemon configuration"),
       browser: z
         .object({
-          relay: z
+          cdp: z
             .object({
-              enabled: z.boolean().optional().describe("Enable browser relay WebSocket server (default: false)"),
-              port: z
-                .number()
-                .int()
-                .positive()
-                .optional()
-                .describe("Port for browser relay WebSocket server (default: 4097)"),
+              port: z.number().int().positive().optional().describe("CDP debugging port to connect to (default: 9222)"),
             })
             .optional(),
+          pinchtab: z
+            .object({
+              enabled: z.boolean().optional().describe("Use PinchTab daemon if available (default: true)"),
+              url: z.string().optional().describe("PinchTab server URL (default: http://localhost:9867)"),
+            })
+            .optional()
+            .describe("PinchTab integration for persistent browser profiles"),
         })
         .optional()
-        .describe("Browser extension relay configuration"),
+        .describe("Browser control via Chrome DevTools Protocol or PinchTab"),
     })
     .strict()
     .meta({

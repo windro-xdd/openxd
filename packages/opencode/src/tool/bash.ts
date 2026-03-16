@@ -13,6 +13,7 @@ import { Filesystem } from "@/util/filesystem"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
 import { Shell } from "@/shell/shell"
+import { markAgentCreatedDir } from "./external-directory"
 import os from "os"
 
 import { BashArity } from "@/permission/arity"
@@ -259,6 +260,51 @@ export const BashTool = Tool.define("bash", async () => {
       })
 
       const resultMetadata: string[] = []
+
+      // After successful execution, mark directories created by mkdir
+      // so write/edit tools can access them without re-prompting
+      if (proc.exitCode === 0) {
+        for (const node of tree.rootNode.descendantsOfType("command")) {
+          if (!node) continue
+          const command = []
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)
+            if (!child) continue
+            if (
+              child.type !== "command_name" &&
+              child.type !== "word" &&
+              child.type !== "string" &&
+              child.type !== "raw_string" &&
+              child.type !== "concatenation"
+            )
+              continue
+            command.push(child.text)
+          }
+          if (command[0] === "mkdir") {
+            for (const arg of command.slice(1)) {
+              if (arg.startsWith("-")) continue
+              const expandedArg = arg.startsWith("~/") ? os.homedir() + arg.slice(1) : arg
+              const resolvedArg = path.resolve(cwd, expandedArg)
+              // Handle brace expansion: mark the parent directory
+              // e.g. ~/bbh/doordash/{recon,findings,reports} → mark ~/bbh/doordash/
+              if (resolvedArg.includes("{")) {
+                const parentOfBrace = resolvedArg.split("{")[0].replace(/\/+$/, "")
+                const resolvedParent = await fs.realpath(parentOfBrace).catch(() => "")
+                if (resolvedParent && !Instance.containsPath(resolvedParent)) {
+                  markAgentCreatedDir(resolvedParent)
+                  log.info("marked agent-created directory (brace parent)", { dir: resolvedParent })
+                }
+              } else {
+                const resolved = await fs.realpath(resolvedArg).catch(() => "")
+                if (resolved && !Instance.containsPath(resolved)) {
+                  markAgentCreatedDir(resolved)
+                  log.info("marked agent-created directory", { dir: resolved })
+                }
+              }
+            }
+          }
+        }
+      }
 
       if (timedOut) {
         resultMetadata.push(`bash tool terminated command after exceeding timeout ${timeout} ms`)

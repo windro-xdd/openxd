@@ -11,6 +11,7 @@ export const TuiEvent = {
         z.enum([
           "session.list",
           "session.new",
+          "session.temp",
           "session.share",
           "session.interrupt",
           "session.compact",

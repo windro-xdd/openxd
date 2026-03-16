@@ -463,6 +463,12 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+  | {
+      type: "loop"
+      mode: string
+      iteration: number
+      maxIterations: number
+    }
 
 export type EventSessionStatus = {
   type: "session.status"

@@ -591,6 +591,12 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+  | {
+      type: "loop"
+      mode: string
+      iteration: number
+      maxIterations: number
+    }
 
 export type EventSessionStatus = {
   type: "session.status"
@@ -678,21 +684,6 @@ export type EventQuestionRejected = {
   }
 }
 
-export type EventSessionCompacted = {
-  type: "session.compacted"
-  properties: {
-    sessionID: string
-  }
-}
-
-export type EventFileWatcherUpdated = {
-  type: "file.watcher.updated"
-  properties: {
-    file: string
-    event: "add" | "change" | "unlink"
-  }
-}
-
 export type Todo = {
   /**
    * Brief description of the task
@@ -716,6 +707,81 @@ export type EventTodoUpdated = {
   }
 }
 
+export type EventSessionCompacted = {
+  type: "session.compacted"
+  properties: {
+    sessionID: string
+  }
+}
+
+export type EventFileWatcherUpdated = {
+  type: "file.watcher.updated"
+  properties: {
+    file: string
+    event: "add" | "change" | "unlink"
+  }
+}
+
+export type EventOrchestratorProjectCreated = {
+  type: "orchestrator.project.created"
+  properties: {
+    projectID: string
+    sessionID: string
+  }
+}
+
+export type EventOrchestratorWaveStarted = {
+  type: "orchestrator.wave.started"
+  properties: {
+    projectID: string
+    wave: number
+    taskCount: number
+  }
+}
+
+export type EventOrchestratorTaskStarted = {
+  type: "orchestrator.task.started"
+  properties: {
+    projectID: string
+    taskID: string
+    title: string
+  }
+}
+
+export type EventOrchestratorTaskCompleted = {
+  type: "orchestrator.task.completed"
+  properties: {
+    projectID: string
+    taskID: string
+    title: string
+  }
+}
+
+export type EventOrchestratorTaskFailed = {
+  type: "orchestrator.task.failed"
+  properties: {
+    projectID: string
+    taskID: string
+    error: string
+  }
+}
+
+export type EventOrchestratorProjectCompleted = {
+  type: "orchestrator.project.completed"
+  properties: {
+    projectID: string
+    tasksCompleted: number
+  }
+}
+
+export type EventOrchestratorProjectFailed = {
+  type: "orchestrator.project.failed"
+  properties: {
+    projectID: string
+    reason: string
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -729,6 +795,7 @@ export type EventTuiCommandExecute = {
     command:
       | "session.list"
       | "session.new"
+      | "session.temp"
       | "session.share"
       | "session.interrupt"
       | "session.compact"
@@ -792,6 +859,50 @@ export type EventCommandExecuted = {
     sessionID: string
     arguments: string
     messageID: string
+  }
+}
+
+export type EventModeActivated = {
+  type: "mode.activated"
+  properties: {
+    sessionID: string
+    mode: string
+  }
+}
+
+export type EventModeDeactivated = {
+  type: "mode.deactivated"
+  properties: {
+    sessionID: string
+    mode: string
+  }
+}
+
+export type EventLoopProgress = {
+  type: "loop.progress"
+  properties: {
+    sessionID: string
+    iteration: number
+    maxIterations: number
+    reason: string
+  }
+}
+
+export type EventLoopPaused = {
+  type: "loop.paused"
+  properties: {
+    sessionID: string
+    iteration: number
+    reason: string
+  }
+}
+
+export type EventLoopCompleted = {
+  type: "loop.completed"
+  properties: {
+    sessionID: string
+    iterations: number
+    reason: string
   }
 }
 
@@ -979,9 +1090,16 @@ export type Event =
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
+  | EventTodoUpdated
   | EventSessionCompacted
   | EventFileWatcherUpdated
-  | EventTodoUpdated
+  | EventOrchestratorProjectCreated
+  | EventOrchestratorWaveStarted
+  | EventOrchestratorTaskStarted
+  | EventOrchestratorTaskCompleted
+  | EventOrchestratorTaskFailed
+  | EventOrchestratorProjectCompleted
+  | EventOrchestratorProjectFailed
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -989,6 +1107,11 @@ export type Event =
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
+  | EventModeActivated
+  | EventModeDeactivated
+  | EventLoopProgress
+  | EventLoopPaused
+  | EventLoopCompleted
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
@@ -1464,6 +1587,19 @@ export type Config = {
      */
     url?: string
   }
+  /**
+   * Automatically switch models when rate limited — useful for long unattended runs
+   */
+  rateLimitFallback?: {
+    /**
+     * Enable automatic model cycling when rate limited (default: false)
+     */
+    enabled?: boolean
+    /**
+     * Ordered list of model IDs to cycle through when rate limited. e.g. ['github-copilot/gpt-4.1', 'github-copilot/o4-mini']. When the active model is rate limited, the next model in the list is used. Cycles back to the primary model when rate limit clears.
+     */
+    models?: Array<string>
+  }
   compaction?: {
     /**
      * Enable automatic compaction when context is full (default: true)
@@ -1477,6 +1613,43 @@ export type Config = {
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */
     reserved?: number
+  }
+  /**
+   * Custom modes — keyword-triggered session configurations (ultrawork, search, analyze, plan)
+   */
+  modes?: {
+    [key: string]: {
+      /**
+       * Description of this mode
+       */
+      description?: string
+      /**
+       * Enable autonomous loop (default: false)
+       */
+      loop?: boolean
+      /**
+       * Disable write/edit tools — read-only exploration (default: false)
+       */
+      readOnly?: boolean
+      /**
+       * Maximum loop iterations before forced stop (default: 50)
+       */
+      maxIterations?: number
+      /**
+       * System prompt injection when mode is active
+       */
+      prompt?: string
+      /**
+       * Override model for this mode
+       */
+      model?: string
+      /**
+       * Override specific tool permissions (tool name → enabled)
+       */
+      tools?: {
+        [key: string]: boolean
+      }
+    }
   }
   experimental?: {
     disable_paste_summary?: boolean
@@ -1500,6 +1673,61 @@ export type Config = {
      * Timeout in milliseconds for model context protocol (MCP) requests
      */
     mcp_timeout?: number
+  }
+  /**
+   * Telegram bot configuration for remote access
+   */
+  telegram?: {
+    /**
+     * Telegram bot token from @BotFather
+     */
+    botToken?: string
+    /**
+     * Telegram user IDs allowed to use the bot. Empty = allow all.
+     */
+    allowedUsers?: Array<number>
+  }
+  /**
+   * Daemon configuration
+   */
+  daemon?: {
+    /**
+     * Heartbeat configuration for proactive checks
+     */
+    heartbeat?: {
+      /**
+       * Enable heartbeat system (default: false)
+       */
+      enabled?: boolean
+      /**
+       * Heartbeat interval in minutes (default: 30)
+       */
+      intervalMinutes?: number
+      /**
+       * Time range to skip heartbeats
+       */
+      quietHours?: {
+        /**
+         * Quiet hours start time (HH:MM, 24h format)
+         */
+        start?: string
+        /**
+         * Quiet hours end time (HH:MM, 24h format)
+         */
+        end?: string
+      }
+    }
+  }
+  /**
+   * Browser control via Chrome DevTools Protocol
+   */
+  browser?: {
+    cdp?: {
+      /**
+       * CDP debugging port to connect to (default: 9222)
+       */
+      port?: number
+    }
   }
 }
 

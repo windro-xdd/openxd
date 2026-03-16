@@ -433,8 +433,13 @@ export namespace ProviderTransform {
           return {}
         }
         if (model.id.includes("claude")) {
+          // Use per-effort thinking budgets for Claude on Copilot
+          // Adaptive type not available via Copilot SDK — use explicit budgets per effort
           return {
-            thinking: { thinking_budget: 4000 },
+            low: { thinking: { thinking_budget: 2000 } },
+            medium: { thinking: { thinking_budget: 8000 } },
+            high: { thinking: { thinking_budget: 16000 } },
+            max: { thinking: { thinking_budget: 32000 } },
           }
         }
         const copilotEfforts = iife(() => {

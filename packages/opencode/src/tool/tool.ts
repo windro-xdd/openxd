@@ -61,8 +61,12 @@ export namespace Tool {
             if (error instanceof z.ZodError && toolInfo.formatValidationError) {
               throw new Error(toolInfo.formatValidationError(error), { cause: error })
             }
+            const issues =
+              error instanceof z.ZodError
+                ? error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n")
+                : String(error)
             throw new Error(
-              `The ${id} tool was called with invalid arguments: ${error}.\nPlease rewrite the input so it satisfies the expected schema.`,
+              `The ${id} tool was called with invalid arguments:\n${issues}\nRewrite the input to fix these issues.`,
               { cause: error },
             )
           }

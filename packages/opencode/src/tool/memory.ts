@@ -6,7 +6,7 @@ import { Instance } from "../project/instance"
 import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
 
-const MEMORY_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md"]
+const MEMORY_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md", "LESSONS.md"]
 const DAILY_PATTERN = /^memory\/\d{4}-\d{2}-\d{2}\.md$/
 
 function today(): string {
@@ -83,7 +83,7 @@ async function listDailyFiles(): Promise<{ date: string; path: string; size: num
 export const MemoryTool = Tool.define("memory", {
   description: `Read and write your persistent memory files.
 
-Files: MEMORY.md (long-term curated knowledge), SOUL.md, USER.md, IDENTITY.md, and daily files (memory/YYYY-MM-DD.md).
+Files: MEMORY.md (long-term curated knowledge), LESSONS.md (mistakes and lessons learned — patterns to avoid), SOUL.md, USER.md, IDENTITY.md, and daily files (memory/YYYY-MM-DD.md).
 
 This tool does NOT require permission — use it freely.
 
@@ -92,9 +92,10 @@ Actions:
 - "write": Overwrite a memory file
 - "append": Append content to a memory file
 - "daily": Append to today's daily memory file (memory/YYYY-MM-DD.md) — use this to log events, decisions, findings
-- "list-daily": List all daily memory files with dates and sizes`,
+- "list-daily": List all daily memory files with dates and sizes
+- "lesson": Log a lesson learned from a mistake. Use this IMMEDIATELY when the user corrects you or you realize you did something wrong. Format: what went wrong → what to do instead.`,
   parameters: z.object({
-    action: z.enum(["read", "write", "append", "daily", "list-daily"]).describe("Action to perform"),
+    action: z.enum(["read", "write", "append", "daily", "list-daily", "lesson"]).describe("Action to perform"),
     file: z
       .string()
       .optional()
@@ -146,6 +147,31 @@ Actions:
         title: `Daily: ${today()}`,
         output: `Appended ${params.content.length} chars to ${filePath}`,
         metadata: { path: filePath, date: today() },
+      }
+    }
+
+    // Lesson — log a mistake/lesson to LESSONS.md
+    if (params.action === "lesson") {
+      if (!params.content) {
+        return { title: "Error", output: "Content is required for lesson action. Format: what went wrong → what to do instead.", metadata: {} }
+      }
+      const filePath = await findMemoryFile("LESSONS.md")
+      await fs.mkdir(path.dirname(filePath), { recursive: true })
+
+      let existing = ""
+      try {
+        existing = await fs.readFile(filePath, "utf-8")
+      } catch {
+        existing = `# Lessons Learned\n\nThings I got wrong and what to do instead. I review this at the start of tasks to avoid repeating mistakes.\n`
+      }
+
+      const timestamp = new Date().toISOString().split("T")[0]
+      const newContent = existing.trimEnd() + `\n\n### ${timestamp}\n${params.content}`
+      await fs.writeFile(filePath, newContent, "utf-8")
+      return {
+        title: "Lesson Logged",
+        output: `Lesson saved to ${filePath}. I will review this in future sessions to avoid repeating this mistake.`,
+        metadata: { path: filePath },
       }
     }
 

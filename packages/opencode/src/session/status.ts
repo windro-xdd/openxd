@@ -18,6 +18,12 @@ export namespace SessionStatus {
       z.object({
         type: z.literal("busy"),
       }),
+      z.object({
+        type: z.literal("loop"),
+        mode: z.string(),
+        iteration: z.number(),
+        maxIterations: z.number(),
+      }),
     ])
     .meta({
       ref: "SessionStatus",

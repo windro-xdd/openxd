@@ -15,8 +15,10 @@ import { SessionCompaction } from "./compaction"
 import { Instance } from "../project/instance"
 import { Bus } from "../bus"
 import { ProviderTransform } from "../provider/transform"
+import { Token } from "../util/token"
 import { SystemPrompt } from "./system"
 import { InstructionPrompt } from "./instruction"
+import { Observation } from "../observation/observation"
 import { Plugin } from "../plugin"
 import PROMPT_PLAN from "../session/prompt/plan.txt"
 import BUILD_SWITCH from "../session/prompt/build-switch.txt"
@@ -46,6 +48,8 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { Mode } from "@/mode"
+import { LoopController } from "@/loop"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -62,6 +66,30 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
+
+  const CORRECTION_PATTERNS = [
+    /\bno[,.\s!]|^no$/i,
+    /\bwrong\b/i,
+    /\bnot what i/i,
+    /\bnot right\b/i,
+    /\bincorrect\b/i,
+    /\byou missed\b/i,
+    /\byou forgot\b/i,
+    /\bstill not\b/i,
+    /\bthat('s| is) not\b/i,
+    /\bi (said|told you|already|mentioned)\b/i,
+    /\brevert\b/i,
+    /\bundo\b/i,
+    /\bthat broke\b/i,
+    /\bwhy did you\b/i,
+    /\bnope\b/i,
+  ]
+
+  function detectCorrection(text: string): boolean {
+    const lower = text.toLowerCase().trim()
+    if (lower.length > 500) return false // long messages are usually new requests
+    return CORRECTION_PATTERNS.some((p) => p.test(lower))
+  }
 
   const state = Instance.state(
     () => {
@@ -160,6 +188,28 @@ export namespace SessionPrompt {
     const session = await Session.get(input.sessionID)
     await SessionRevert.cleanup(session)
 
+    // --- Mode Detection ---
+    // Scan user input for mode keywords (ultrawork, search, analyze, plan)
+    const textParts = input.parts.filter((p) => p.type === "text")
+    const firstText = textParts[0]?.type === "text" ? textParts[0].text : ""
+    const detectedMode = Mode.detect(firstText)
+    let activeMode: Mode.Info | undefined
+
+    if (detectedMode) {
+      activeMode = await Mode.get(detectedMode.mode)
+      if (activeMode) {
+        // Clean the keyword from the user message
+        if (textParts[0] && textParts[0].type === "text") {
+          textParts[0].text = detectedMode.cleanText
+        }
+        log.info("mode activated", { mode: activeMode.name, sessionID: input.sessionID })
+        Bus.publish(Mode.Event.Activated, {
+          sessionID: input.sessionID,
+          mode: activeMode.name,
+        })
+      }
+    }
+
     const message = await createUserMessage(input)
     await Session.touch(input.sessionID)
 
@@ -176,6 +226,24 @@ export namespace SessionPrompt {
     if (permissions.length > 0) {
       session.permission = permissions
       await Session.setPermission({ sessionID: session.id, permission: permissions })
+    }
+
+    // Apply mode permissions (readOnly, tool overrides)
+    if (activeMode) {
+      const modePermissions = Mode.resolvePermissions(activeMode)
+      if (modePermissions.length > 0) {
+        const merged = [...(session.permission ?? []), ...modePermissions]
+        session.permission = merged
+        await Session.setPermission({ sessionID: session.id, permission: merged })
+      }
+
+      // Start autonomous loop if mode has loop enabled
+      if (activeMode.loop) {
+        LoopController.start(input.sessionID, activeMode.name, activeMode.maxIterations)
+      }
+
+      // Store active mode for system prompt injection
+      Mode.setActive(input.sessionID, activeMode.name)
     }
 
     if (input.noReply === true) {
@@ -256,6 +324,8 @@ export namespace SessionPrompt {
 
   export function cancel(sessionID: string) {
     log.info("cancel", { sessionID })
+    // Cancel any active autonomous loop
+    LoopController.cancel(sessionID)
     const s = state()
     const match = s[sessionID]
     if (!match) {
@@ -291,6 +361,8 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
+    let deferredCompaction = false
+    let lastUser: MessageV2.User | undefined
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -298,7 +370,7 @@ export namespace SessionPrompt {
       if (abort.aborted) break
       let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
 
-      let lastUser: MessageV2.User | undefined
+      lastUser = undefined
       let lastAssistant: MessageV2.Assistant | undefined
       let lastFinished: MessageV2.Assistant | undefined
       let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
@@ -526,21 +598,13 @@ export namespace SessionPrompt {
         continue
       }
 
-      // pending compaction
+      // pending compaction — skip it, we use prune + sliding window instead
       if (task?.type === "compaction") {
-        const result = await SessionCompaction.process({
-          messages: msgs,
-          parentID: lastUser.id,
-          abort,
-          sessionID,
-          auto: task.auto,
-          overflow: task.overflow,
-        })
-        if (result === "stop") break
-        continue
+        // Ignore queued compaction tasks — just continue to normal processing
+        log.info("skipping compaction task, using prune + sliding window", { sessionID })
       }
 
-      // early pruning — trim old tool outputs at 70% capacity to delay/avoid full compaction
+      // early pruning — trim old tool outputs at 40% capacity
       if (
         lastFinished &&
         lastFinished.summary !== true &&
@@ -549,19 +613,15 @@ export namespace SessionPrompt {
         await SessionCompaction.prune({ sessionID })
       }
 
-      // context overflow, needs compaction
-      if (
-        lastFinished &&
-        lastFinished.summary !== true &&
-        (await SessionCompaction.isOverflow({ tokens: lastFinished.tokens, model }))
-      ) {
-        await SessionCompaction.create({
+      // sliding window — always apply to keep context within budget
+      // Token-aware: will only trim if messages exceed 45% of context
+      let effectiveMsgs = SessionCompaction.slidingWindow(msgs, model)
+      if (effectiveMsgs.length < msgs.length) {
+        log.info("sliding window trimmed", {
           sessionID,
-          agent: lastUser.agent,
-          model: lastUser.model,
-          auto: true,
+          before: msgs.length,
+          after: effectiveMsgs.length,
         })
-        continue
       }
 
       // normal processing
@@ -658,11 +718,162 @@ export namespace SessionPrompt {
 
       await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+      // Detect user corrections and inject lesson-logging reminder
+      if (lastUser && step > 0) {
+        for (const msg of msgs) {
+          if (msg.info.role !== "user" || msg.info.id !== lastUser.id) continue
+          for (const part of msg.parts) {
+            if (part.type !== "text" || part.ignored || part.synthetic) continue
+            if (detectCorrection(part.text)) {
+              part.text +=
+                "\n\n<system-reminder>The user appears to be correcting you. IMMEDIATELY call memory(action: 'lesson', content: '...') to log what you did wrong and what to do instead. Be specific — generic lessons like 'be more careful' are useless. Then fix the issue.</system-reminder>"
+              break
+            }
+          }
+        }
+      }
+
       // Build system prompt, adding structured output instruction if needed
       const system = [...(await SystemPrompt.environment(model)), ...(await InstructionPrompt.system())]
       const format = lastUser.format ?? { type: "text" }
       if (format.type === "json_schema") {
         system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+      }
+
+      // Inject active mode prompt into system context
+      const activeModeName = Mode.getActive(sessionID) ?? LoopController.get(sessionID)?.modeName
+      if (activeModeName) {
+        const activeMode = await Mode.get(activeModeName)
+        if (activeMode?.prompt) {
+          system.push(activeMode.prompt)
+        }
+      }
+
+      // === CONTEXT BUDGET AWARENESS ===
+      // Tell the model how much context space remains so it doesn't get "context anxiety"
+      // (Cognition/Devin finding: models take shortcuts when they think context is running out)
+      {
+        const ctx = model.limit.context || 200_000
+        const pct = lastFinished
+          ? Math.round(
+              ((lastFinished.tokens.input +
+                lastFinished.tokens.output +
+                lastFinished.tokens.cache.read +
+                lastFinished.tokens.cache.write) /
+                ctx) *
+                100,
+            )
+          : 0
+        if (pct > 50) {
+          system.push(
+            `<context-budget>You have used approximately ${pct}% of your context window. You still have plenty of room to work — do not rush, skip steps, or give shorter answers to save space. Work at full quality.</context-budget>`,
+          )
+        }
+      }
+
+      // === PRE-FLIGHT TOKEN CHECK ===
+      // Estimate total tokens BEFORE sending to the API to avoid 413 / context overflow errors.
+      // This catches cases where large image attachments push us over the limit even though
+      // the sliding window thought we were fine (because it previously didn't count file parts).
+      {
+        const contextLimit = model.limit.context || 200_000
+        const inputLimit = model.limit.input || contextLimit
+        const maxOutput = ProviderTransform.maxOutputTokens(model)
+        const safeInputLimit = Math.floor((inputLimit - maxOutput) * 0.9) // 90% of usable input space
+
+        let estimatedTokens = 0
+        // Count system prompt tokens
+        for (const s of system) {
+          estimatedTokens += Token.estimate(typeof s === "string" ? s : JSON.stringify(s))
+        }
+        // Count message tokens (including file/image data URLs and tool attachments like screenshots)
+        for (const msg of effectiveMsgs) {
+          for (const part of msg.parts) {
+            if (part.type === "text") {
+              estimatedTokens += Token.estimate(part.text)
+            } else if (part.type === "tool") {
+              const output = part.state.status === "completed" ? (part.state.output ?? "") : ""
+              estimatedTokens += Token.estimate(output) + Token.estimate(JSON.stringify(part.state.input ?? {}))
+              // Count tool attachments (browser screenshots, images from tool results)
+              if (part.state.status === "completed" && !part.state.time.compacted) {
+                for (const att of part.state.attachments ?? []) {
+                  estimatedTokens += Token.estimateDataUrl((att as any).url ?? "")
+                }
+              }
+            } else if (part.type === "file") {
+              estimatedTokens += Token.estimateDataUrl((part as any).url ?? "")
+            }
+          }
+        }
+
+        if (estimatedTokens > safeInputLimit) {
+          log.info("pre-flight: estimated tokens exceed safe limit, pruning + re-windowing", {
+            sessionID,
+            estimatedTokens,
+            safeInputLimit,
+            contextLimit,
+          })
+
+          // Step 1: Emergency prune old tool outputs
+          await SessionCompaction.emergencyPrune({ sessionID })
+
+          // Step 2: Re-fetch messages and re-apply sliding window
+          msgs = await Session.messages({ sessionID })
+          effectiveMsgs = SessionCompaction.slidingWindow(msgs, model)
+
+          // Step 3: Re-estimate — if still over, strip media from older messages (keep only last turn's images)
+          let reEstimated = 0
+          for (const s of system) {
+            reEstimated += Token.estimate(typeof s === "string" ? s : JSON.stringify(s))
+          }
+          for (const msg of effectiveMsgs) {
+            for (const part of msg.parts) {
+              if (part.type === "text") {
+                reEstimated += Token.estimate(part.text)
+              } else if (part.type === "tool") {
+                const output = part.state.status === "completed" ? (part.state.output ?? "") : ""
+                reEstimated += Token.estimate(output) + Token.estimate(JSON.stringify(part.state.input ?? {}))
+                if (part.state.status === "completed" && !part.state.time.compacted) {
+                  for (const att of part.state.attachments ?? []) {
+                    reEstimated += Token.estimateDataUrl((att as any).url ?? "")
+                  }
+                }
+              } else if (part.type === "file") {
+                reEstimated += Token.estimateDataUrl((part as any).url ?? "")
+              }
+            }
+          }
+
+          if (reEstimated > safeInputLimit) {
+            log.info("pre-flight: still over limit after pruning, stripping old media", {
+              sessionID,
+              reEstimated,
+              safeInputLimit,
+            })
+            // Strip media from all messages except the last user message
+            const lastUserIdx = effectiveMsgs.findLastIndex((m) => m.info.role === "user")
+            for (let i = 0; i < effectiveMsgs.length; i++) {
+              if (i === lastUserIdx) continue // keep the latest user message's attachments
+              const msg = effectiveMsgs[i]
+              // Strip file parts that are media
+              msg.parts = msg.parts.filter((p) => {
+                if (p.type === "file" && MessageV2.isMedia((p as any).mime ?? "")) {
+                  return false // strip old media
+                }
+                return true
+              })
+              // Strip tool attachments (browser screenshots etc.) — mark as compacted in-memory
+              for (const part of msg.parts) {
+                if (part.type === "tool" && part.state.status === "completed" && !part.state.time.compacted) {
+                  if (part.state.attachments?.length) {
+                    part.state.attachments = []
+                    part.state.time.compacted = Date.now()
+                  }
+                }
+              }
+            }
+          }
+        }
       }
 
       const result = await processor.process({
@@ -672,7 +883,7 @@ export namespace SessionPrompt {
         sessionID,
         system,
         messages: [
-          ...MessageV2.toModelMessages(msgs, model),
+          ...MessageV2.toModelMessages(effectiveMsgs, model),
           ...(isLastStep
             ? [
                 {
@@ -711,18 +922,57 @@ export namespace SessionPrompt {
         }
       }
 
-      if (result === "stop") break
+      if (result === "stop") {
+        // --- Autonomous Loop Continuation ---
+        // If a loop is active, evaluate whether to continue instead of stopping
+        const activeLoop = LoopController.get(sessionID)
+        if (activeLoop?.active && !abort.aborted) {
+          const evaluation = await LoopController.evaluate(sessionID)
+
+          if (evaluation.action === "continue") {
+            LoopController.advance(sessionID)
+            await LoopController.injectContinuation(sessionID, activeLoop, lastUser!)
+            log.info("loop continuing", {
+              sessionID,
+              iteration: activeLoop.iteration,
+              reason: evaluation.reason,
+            })
+            continue // re-enter the while loop
+          }
+
+          if (evaluation.action === "pause") {
+            Bus.publish(LoopController.Event.Paused, {
+              sessionID,
+              iteration: activeLoop.iteration,
+              reason: evaluation.reason,
+            })
+            LoopController.cancel(sessionID)
+            log.info("loop paused", { sessionID, reason: evaluation.reason })
+          }
+
+          if (evaluation.action === "stop") {
+            Bus.publish(LoopController.Event.Completed, {
+              sessionID,
+              iterations: activeLoop.iteration,
+              reason: evaluation.reason,
+            })
+            LoopController.cancel(sessionID)
+            log.info("loop completed", { sessionID, reason: evaluation.reason })
+          }
+        }
+        break
+      }
       if (result === "compact") {
-        await SessionCompaction.create({
-          sessionID,
-          agent: lastUser.agent,
-          model: lastUser.model,
-          auto: true,
-          overflow: !processor.message.finish,
-        })
+        // Context overflow mid-response — escalating recovery:
+        // 1. Emergency prune (nuke ALL old tool outputs)
+        // 2. Re-fetch messages so sliding window picks up the freed space
+        log.info("context overflow mid-response, emergency pruning and continuing", { sessionID, step })
+        await SessionCompaction.emergencyPrune({ sessionID })
+        continue
       }
       continue
     }
+    // deferred compaction disabled — prune + sliding window handle context management
     SessionCompaction.prune({ sessionID })
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
@@ -832,6 +1082,20 @@ export namespace SessionPrompt {
             },
             output,
           )
+
+          // Capture observation for cross-session memory
+          if (output.output) {
+            Observation.capture({
+              projectId: Instance.project.id,
+              sessionId: ctx.sessionID,
+              tool: item.id,
+              input: args,
+              output: output.output,
+            }).catch((err) => {
+              log.debug("observation capture failed", { err })
+            })
+          }
+
           return output
         },
       })
@@ -1755,6 +2019,160 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
   export async function command(input: CommandInput) {
     log.info("command", input)
+
+    // /also — parallel execution: fork session, run in background, merge results back
+    if (input.command === "also") {
+      const task = input.arguments.trim()
+      if (!task) {
+        Bus.publish(Session.Event.Error, {
+          sessionID: input.sessionID,
+          error: new NamedError.Unknown({ message: "/also requires a task description" }).toObject(),
+        })
+        throw new Error("/also requires a task description")
+      }
+
+      // Fork the current session with full context
+      const forkedSession = await Session.fork({
+        sessionID: input.sessionID,
+      })
+
+      log.info("/also: forked session", {
+        parentSession: input.sessionID,
+        forkedSession: forkedSession.id,
+        task,
+      })
+
+      // Get model to use
+      const model = input.model ? Provider.parseModel(input.model) : await lastModel(input.sessionID)
+
+      const agentName = input.agent ?? (await Agent.defaultAgent())
+
+      // Inject a notification into parent session that task started
+      const notifyMessageID = Identifier.ascending("message")
+      const notifyPartID = Identifier.ascending("part")
+      await Session.updateMessage({
+        id: notifyMessageID,
+        sessionID: input.sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: agentName,
+        model,
+      })
+      await Session.updatePart({
+        id: notifyPartID,
+        messageID: notifyMessageID,
+        sessionID: input.sessionID,
+        type: "text",
+        text: `⚡ **Parallel task started:** ${task}\n\n_Running in background. Continue working._`,
+        synthetic: true,
+      })
+
+      // Run the task in background — don't await
+      const taskPromise = (async () => {
+        try {
+          const messageID = Identifier.ascending("message")
+          const result = (await prompt({
+            sessionID: forkedSession.id,
+            messageID,
+            model,
+            agent: agentName,
+            parts: [{ type: "text", text: task }],
+          })) as MessageV2.WithParts
+
+          const resultText =
+            (result.parts.findLast((x): x is Extract<typeof x, { type: "text" }> => x.type === "text") as any)?.text ??
+            "Task completed (no text output)"
+
+          // Merge result back into parent session
+          const parentMessageID = Identifier.ascending("message")
+          const parentPartID = Identifier.ascending("part")
+          await Session.updateMessage({
+            id: parentMessageID,
+            sessionID: input.sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: agentName,
+            model,
+          })
+          await Session.updatePart({
+            id: parentPartID,
+            messageID: parentMessageID,
+            sessionID: input.sessionID,
+            type: "text",
+            text: [
+              `## ⚡ Parallel Task Completed: ${task}`,
+              "",
+              resultText,
+              "",
+              "---",
+              "_Merged from parallel /also session._",
+            ].join("\n"),
+          })
+
+          Bus.publish(Session.Event.Updated, {
+            info: (await Session.get(input.sessionID))!,
+          })
+
+          log.info("/also: task completed", {
+            parentSession: input.sessionID,
+            forkedSession: forkedSession.id,
+          })
+
+          // Clean up forked session
+          await Session.remove(forkedSession.id)
+        } catch (error) {
+          log.error("/also: task failed", {
+            parentSession: input.sessionID,
+            forkedSession: forkedSession.id,
+            error,
+          })
+
+          const errorMessageID = Identifier.ascending("message")
+          const errorPartID = Identifier.ascending("part")
+          await Session.updateMessage({
+            id: errorMessageID,
+            sessionID: input.sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: agentName,
+            model,
+          })
+          await Session.updatePart({
+            id: errorPartID,
+            messageID: errorMessageID,
+            sessionID: input.sessionID,
+            type: "text",
+            text: `## ❌ Parallel Task Failed: ${task}\n\nError: ${error instanceof Error ? error.message : String(error)}`,
+          })
+
+          await Session.remove(forkedSession.id).catch(() => {})
+        }
+      })()
+
+      taskPromise.catch(() => {}) // prevent unhandled rejection
+
+      // Return the notification message immediately — don't block
+      return {
+        info: {
+          id: notifyMessageID,
+          sessionID: input.sessionID,
+          role: "user" as const,
+          time: { created: Date.now() },
+          agent: agentName,
+          model,
+        },
+        parts: [
+          {
+            id: notifyPartID,
+            messageID: notifyMessageID,
+            sessionID: input.sessionID,
+            type: "text" as const,
+            text: `⚡ Parallel task started: ${task}`,
+          },
+        ],
+      } as any
+    }
+
     const command = await Command.get(input.command)
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
 

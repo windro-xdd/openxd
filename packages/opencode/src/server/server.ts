@@ -13,6 +13,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import { LSP } from "../lsp"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
+import { TelegramRoutes } from "./routes/telegram"
 import { Instance } from "../project/instance"
 import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
@@ -249,6 +250,7 @@ export namespace Server {
       .route("/", FileRoutes())
       .route("/mcp", McpRoutes())
       .route("/tui", TuiRoutes())
+      .route("/telegram", TelegramRoutes())
       .post(
         "/instance/dispose",
         describeRoute({

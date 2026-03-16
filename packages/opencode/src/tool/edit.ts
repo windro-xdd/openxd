@@ -83,8 +83,9 @@ export const EditTool = Tool.define("edit", {
       }
 
       const stats = Filesystem.stat(filePath)
-      if (!stats) throw new Error(`File ${filePath} not found`)
-      if (stats.isDirectory()) throw new Error(`Path is a directory, not a file: ${filePath}`)
+      if (!stats) throw new Error(`File ${filePath} not found. To create a new file, use the write tool instead.`)
+      if (stats.isDirectory())
+        throw new Error(`Path is a directory, not a file: ${filePath}. Use the read tool to list directory contents.`)
       await FileTime.assert(ctx.sessionID, filePath)
       contentOld = await Filesystem.readText(filePath)
 
@@ -661,8 +662,10 @@ export function replace(content: string, oldString: string, newString: string, r
 
   if (notFound) {
     throw new Error(
-      "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
+      "oldString not found in content. It must match the file's current content EXACTLY — including whitespace, indentation, and line endings. Read the file with the read tool to see its exact current content, then retry with the correct oldString.",
     )
   }
-  throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+  throw new Error(
+    "Found multiple matches for oldString. Provide more surrounding lines in oldString to identify the correct match.",
+  )
 }

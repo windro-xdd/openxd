@@ -1,0 +1,44 @@
+#!/bin/bash
+# Telegram pairing helper for OpenCode
+# Usage: telegram-pair <CODE>
+
+PORT=${OPENCODE_PORT:-4096}
+BASE="http://127.0.0.1:$PORT"
+
+case "${1:-}" in
+  pair)
+    if [ -z "${2:-}" ]; then
+      echo "Usage: $0 pair <CODE>"
+      exit 1
+    fi
+    result=$(curl -s -X POST "$BASE/telegram/pair" \
+      -H "Content-Type: application/json" \
+      -d "{\"code\": \"$2\"}")
+    if echo "$result" | grep -q '"success":true'; then
+      username=$(echo "$result" | grep -o '"username":"[^"]*"' | cut -d'"' -f4)
+      firstName=$(echo "$result" | grep -o '"firstName":"[^"]*"' | cut -d'"' -f4)
+      echo "✅ Paired! User: ${firstName:-unknown} (@${username:-unknown})"
+    else
+      echo "❌ Invalid or expired pairing code"
+    fi
+    ;;
+  users)
+    curl -s "$BASE/telegram/users" | python3 -m json.tool 2>/dev/null || curl -s "$BASE/telegram/users"
+    ;;
+  remove)
+    if [ -z "${2:-}" ]; then
+      echo "Usage: $0 remove <USER_ID>"
+      exit 1
+    fi
+    curl -s -X DELETE "$BASE/telegram/users/$2"
+    echo
+    ;;
+  *)
+    echo "OpenCode Telegram Management"
+    echo ""
+    echo "Usage:"
+    echo "  $0 pair <CODE>     Approve a pairing request"
+    echo "  $0 users           List paired users"
+    echo "  $0 remove <ID>     Remove a paired user"
+    ;;
+esac

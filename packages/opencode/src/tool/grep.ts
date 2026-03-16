@@ -53,7 +53,7 @@ export const GrepTool = Tool.define("grep", {
     })
 
     if (!proc.stdout || !proc.stderr) {
-      throw new Error("Process output not available")
+      throw new Error("ripgrep process failed to produce output. Try using bash with 'rg' directly.")
     }
 
     const output = await text(proc.stdout)
@@ -67,7 +67,7 @@ export const GrepTool = Tool.define("grep", {
       return {
         title: params.pattern,
         metadata: { matches: 0, truncated: false },
-        output: "No files found",
+        output: `No files found matching pattern "${params.pattern}"${params.include ? ` in files matching "${params.include}"` : ""}${params.path ? ` under ${params.path}` : ""}. Check that the regex pattern is correct and the search path exists.`,
       }
     }
 

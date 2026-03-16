@@ -182,7 +182,28 @@ export const TuiThreadCommand = cmd({
         network.port !== 0 ||
         network.hostname !== "127.0.0.1"
 
-      const transport = external
+      // Auto-detect running daemon/serve process
+      let daemonUrl: string | undefined
+      if (!external) {
+        try {
+          const res = await fetch("http://127.0.0.1:4096/", {
+            signal: AbortSignal.timeout(1000),
+          })
+          // Any response means the server is there
+          daemonUrl = "http://127.0.0.1:4096"
+          Log.Default.info("detected running daemon, connecting TUI to it", { url: daemonUrl })
+        } catch {
+          // No daemon running, use worker
+        }
+      }
+
+      const transport = daemonUrl
+        ? {
+            url: daemonUrl,
+            fetch: undefined,
+            events: undefined,
+          }
+        : external
         ? {
             url: (await client.call("server", network)).url,
             fetch: undefined,

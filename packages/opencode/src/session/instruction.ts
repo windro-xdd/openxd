@@ -18,7 +18,7 @@ const FILES = [
 ]
 
 // Always loaded independently (not fallbacks like FILES)
-const ALWAYS_LOAD_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md"]
+const ALWAYS_LOAD_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md", "LESSONS.md"]
 
 function todayDate(): string {
   const d = new Date()
@@ -178,9 +178,9 @@ export namespace InstructionPrompt {
     const paths = await systemPaths()
 
     // Max chars per instruction file to prevent context window overflow
-    const MAX_INSTRUCTION_CHARS = 20_000
+    const MAX_INSTRUCTION_CHARS = 40_000
     // Max total chars for all instruction files combined
-    const MAX_TOTAL_INSTRUCTION_CHARS = 60_000
+    const MAX_TOTAL_INSTRUCTION_CHARS = 120_000
     let totalChars = 0
 
     const files = Array.from(paths).map(async (p) => {
@@ -192,7 +192,11 @@ export namespace InstructionPrompt {
       }
       totalChars += content.length
       if (totalChars > MAX_TOTAL_INSTRUCTION_CHARS) {
-        log.warn("total instruction content exceeded limit, skipping", { path: p, totalChars })
+        log.error("instruction content exceeded total limit — file SKIPPED (agent will miss this context)", {
+          path: p,
+          totalChars,
+          limit: MAX_TOTAL_INSTRUCTION_CHARS,
+        })
         return ""
       }
       return "Instructions from: " + p + "\n" + content

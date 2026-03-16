@@ -1,0 +1,3 @@
+Run the following task in parallel using the `also` tool. Fork the current session context, execute the task in the background, and merge results back when done. Continue working on the current task without waiting.
+
+Task: $ARGUMENTS

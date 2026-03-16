@@ -12,7 +12,6 @@ const API = "https://api.telegram.org/bot"
 
 export namespace TelegramBot {
   let token: string
-  let allowedUsers: number[] | undefined
   let offset = 0
   let running = false
 
@@ -51,6 +50,7 @@ export namespace TelegramBot {
   }
 
   async function handleCommand(chatId: number, command: string, userId: number) {
+    try {
     switch (command.split("@")[0]) {
       case "/start":
       case "/new": {
@@ -105,6 +105,11 @@ export namespace TelegramBot {
       default:
         return false
     }
+    } catch (err) {
+      log.error("command handler error", { command, error: err })
+      await sendMessage(chatId, `❌ Error: ${err}`)
+      return true
+    }
   }
 
   async function handleCallbackQuery(callbackQuery: any) {
@@ -147,17 +152,37 @@ export namespace TelegramBot {
   }
 
   async function handleMessage(chatId: number, text: string, userId: number, from: any) {
-    // Check allowed users
-    if (allowedUsers && allowedUsers.length > 0 && !allowedUsers.includes(userId)) {
-      log.warn("unauthorized telegram user", { userId, username: from?.username })
-      await sendMessage(chatId, "⛔ Unauthorized. Your user ID is not in the allowed list.")
+    // Handle /start even for unpaired users
+    if (text === "/start" || text.startsWith("/start@")) {
+      if (TelegramState.isPaired(userId)) {
+        await sendMessage(chatId, "✅ You're already paired. Send a message to start chatting!")
+        return
+      }
+      const code = TelegramState.createPairingRequest(userId, chatId, from?.username, from?.first_name)
+      await sendMessage(
+        chatId,
+        `🔐 *Pairing Required*\n\nYour pairing code: \`${code}\`\n\nOpen the OpenCode TUI and run:\n\`/telegram pair ${code}\`\n\nThis code expires in 10 minutes.`,
+      )
+      return
+    }
+
+    // Check if user is paired
+    if (!TelegramState.isPaired(userId)) {
+      const code = TelegramState.createPairingRequest(userId, chatId, from?.username, from?.first_name)
+      log.warn("unpaired telegram user", { userId, username: from?.username })
+      await sendMessage(
+        chatId,
+        `🔐 *Pairing Required*\n\nYour pairing code: \`${code}\`\n\nOpen the OpenCode TUI and run:\n\`/telegram pair ${code}\`\n\nThis code expires in 10 minutes.`,
+      )
       return
     }
 
     // Handle commands
     if (text.startsWith("/")) {
+      log.info("handling command", { text, command: text.split("@")[0] })
       const handled = await handleCommand(chatId, text, userId)
       if (handled) return
+      log.info("command not handled, treating as message", { text })
     }
 
     // Get or create session
@@ -190,25 +215,30 @@ export namespace TelegramBot {
       let resolved = false
 
       const responsePromise = new Promise<string>((resolve) => {
-        // Listen for text deltas on this session
-        const unsub = Bus.subscribe(MessageV2.Event.PartDelta, (event) => {
-          if (event.properties.sessionID !== sessionId) return
-          if (event.properties.field === "text") {
-            assistantText += event.properties.delta
-          }
-        })
-
-        // Listen for message completion
-        const unsubMsg = Bus.subscribe(MessageV2.Event.Updated, (event) => {
+        // Listen for message completion — extract only text parts, not reasoning
+        const unsubMsg = Bus.subscribe(MessageV2.Event.Updated, async (event) => {
           const info = event.properties.info
           if (info.role !== "assistant") return
           if (!("sessionID" in info) || info.sessionID !== sessionId) return
           if (info.finish && !resolved) {
             resolved = true
-            unsub()
             unsubMsg()
-            // Give a small delay for final deltas to arrive
-            setTimeout(() => resolve(assistantText), 200)
+            // Get the final message parts
+            try {
+              const msgs = await Session.messages({ sessionID: sessionId })
+              const lastMsg = msgs[msgs.length - 1]
+              if (lastMsg && lastMsg.info.role === "assistant") {
+                const textParts = lastMsg.parts
+                  .filter((p: any) => p.type === "text")
+                  .map((p: any) => p.text)
+                  .join("\n")
+                resolve(textParts || "(empty response)")
+              } else {
+                resolve(assistantText || "(no response)")
+              }
+            } catch {
+              resolve(assistantText || "(no response)")
+            }
           }
         })
 
@@ -216,7 +246,6 @@ export namespace TelegramBot {
         setTimeout(() => {
           if (!resolved) {
             resolved = true
-            unsub()
             unsubMsg()
             resolve(assistantText || "⏱️ Response timed out.")
           }
@@ -295,6 +324,11 @@ export namespace TelegramBot {
     })
   }
 
+  export async function notify(chatId: number, text: string) {
+    if (!token) return
+    await api("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown" })
+  }
+
   export async function start() {
     const config = await Config.get()
     const tgConfig = (config as any).telegram
@@ -304,7 +338,6 @@ export namespace TelegramBot {
     }
 
     token = tgConfig.botToken
-    allowedUsers = tgConfig.allowedUsers
     running = true
 
     TelegramState.init()

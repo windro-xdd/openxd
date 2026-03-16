@@ -10,6 +10,83 @@ export const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 const LARGE_PASTE_CHARS = 8000
 const LARGE_PASTE_BREAKS = 120
 
+// Image compression settings to avoid "Request Entity Too Large" (413) errors
+const MAX_IMAGE_SIZE_BYTES = 512 * 1024 // 512KB — safe for most provider payload limits
+const MAX_IMAGE_DIMENSION = 2048 // max width/height in pixels
+const COMPRESSION_QUALITY = 0.8 // JPEG/WebP quality (0-1)
+
+/**
+ * Compress an image file if it exceeds size/dimension limits.
+ * Returns the original file if it's already small enough or not compressible (e.g. GIF).
+ */
+async function compressImage(file: File): Promise<File> {
+  // Skip compression for GIFs (animated) and PDFs
+  if (file.type === "image/gif" || file.type === "application/pdf") return file
+  // Skip if already under the limit
+  if (file.size <= MAX_IMAGE_SIZE_BYTES) return file
+
+  return new Promise<File>((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+
+      // Calculate scaled dimensions
+      let { width, height } = img
+      if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+        const scale = MAX_IMAGE_DIMENSION / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+
+      const canvas = document.createElement("canvas")
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext("2d")
+      if (!ctx) {
+        resolve(file)
+        return
+      }
+      ctx.drawImage(img, 0, 0, width, height)
+
+      // Prefer WebP for better compression, fall back to JPEG
+      const outputType = "image/webp"
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) {
+            // Compression didn't help, try JPEG
+            canvas.toBlob(
+              (jpegBlob) => {
+                if (!jpegBlob || jpegBlob.size >= file.size) {
+                  resolve(file) // give up, return original
+                  return
+                }
+                const ext = file.name.replace(/\.[^.]+$/, "") + ".jpg"
+                resolve(new File([jpegBlob], ext, { type: "image/jpeg" }))
+              },
+              "image/jpeg",
+              COMPRESSION_QUALITY,
+            )
+            return
+          }
+          const ext = file.name.replace(/\.[^.]+$/, "") + ".webp"
+          resolve(new File([blob], ext, { type: outputType }))
+        },
+        outputType,
+        COMPRESSION_QUALITY,
+      )
+    }
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(file) // can't decode, return original
+    }
+
+    img.src = url
+  })
+}
+
 function largePaste(text: string) {
   if (text.length >= LARGE_PASTE_CHARS) return true
   let breaks = 0
@@ -38,6 +115,9 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
   const addImageAttachment = async (file: File) => {
     if (!ACCEPTED_FILE_TYPES.includes(file.type)) return
 
+    // Compress large images to avoid 413 "Request Entity Too Large" errors
+    const processed = await compressImage(file)
+
     const reader = new FileReader()
     reader.onload = () => {
       const editor = input.editor()
@@ -46,14 +126,14 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       const attachment: ImageAttachmentPart = {
         type: "image",
         id: uuid(),
-        filename: file.name,
-        mime: file.type,
+        filename: processed.name,
+        mime: processed.type,
         dataUrl,
       }
       const cursorPosition = prompt.cursor() ?? getCursorPosition(editor)
       prompt.set([...prompt.current(), attachment], cursorPosition)
     }
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(processed)
   }
 
   const removeImageAttachment = (id: string) => {

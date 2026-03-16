@@ -113,6 +113,15 @@ export namespace Database {
       migrate(db, entries)
     }
 
+    // Ensure observation FTS5 virtual table exists (created by migration, but ensure idempotent)
+    try {
+      sqlite.run(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS observation_fts USING fts5(id, summary, content, tags, content='observation', content_rowid='rowid')",
+      )
+    } catch {
+      // Table might already exist, that's ok
+    }
+
     return db
   })
 

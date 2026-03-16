@@ -55,7 +55,10 @@ export const GlobTool = Tool.define("glob", {
     files.sort((a, b) => b.mtime - a.mtime)
 
     const output = []
-    if (files.length === 0) output.push("No files found")
+    if (files.length === 0)
+      output.push(
+        `No files found matching "${params.pattern}" in ${search}. Check the glob pattern and directory path.`,
+      )
     if (files.length > 0) {
       output.push(...files.map((f) => f.path))
       if (truncated) {

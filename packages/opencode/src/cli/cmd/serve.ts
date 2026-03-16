@@ -2,12 +2,10 @@ import { Server } from "../../server/server"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
-import { Workspace } from "../../control-plane/workspace"
-import { Project } from "../../project/project"
-import { Installation } from "../../installation"
+import { Instance } from "../../project/instance"
 import { TelegramBot } from "../../telegram/bot"
 import { Heartbeat } from "../../daemon/heartbeat"
-import { BrowserRelay } from "../../browser/relay"
+import { BrowserCDP } from "../../browser/cdp"
 
 export const ServeCommand = cmd({
   command: "serve",
@@ -17,24 +15,26 @@ export const ServeCommand = cmd({
     if (!Flag.OPENCODE_SERVER_PASSWORD) {
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
-    const opts = await resolveNetworkOptions(args)
-    const server = Server.listen(opts)
-    console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
 
-    // Start Telegram bot if configured
-    await TelegramBot.start()
+    await Instance.provide({
+      directory: process.cwd(),
+      async fn() {
+        const opts = await resolveNetworkOptions(args)
+        if (!opts.port) opts.port = 4096
+        const server = Server.listen(opts)
+        console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
 
-    // Start heartbeat if configured
-    await Heartbeat.start()
+        await TelegramBot.start()
+        await Heartbeat.start()
+        await BrowserCDP.start()
 
-    // Start browser relay if configured
-    await BrowserRelay.start()
+        await new Promise(() => {})
 
-    await new Promise(() => {})
-
-    BrowserRelay.stop()
-    Heartbeat.stop()
-    TelegramBot.stop()
-    await server.stop()
+        BrowserCDP.stop()
+        Heartbeat.stop()
+        TelegramBot.stop()
+        await server.stop()
+      },
+    })
   },
 })

@@ -1,128 +1,118 @@
-import z from "zod"
+import { z } from "zod"
 import { Tool } from "./tool"
 import { Session } from "../session"
-import { Instance } from "../project/instance"
+import { MessageV2 } from "../session/message-v2"
 
 export const SessionHistoryTool = Tool.define("session_history", {
-  description: `List and read OTHER sessions (not the current one). Use this to check what work was done in previous sessions, or when the user references something from a past conversation.
+  description: `Search through past session messages that are no longer in your active context. Use this when:
+- The user asks about something from earlier in the conversation that you don't remember
+- You need to recall a specific command output, code snippet, or discussion from earlier
+- The user references something they told you before that's been compacted away
+- You want to find a specific tool result or decision from earlier in this session
 
 Actions:
-- "list": Show recent sessions with titles and timestamps. Skip the current session — look at other ones.
-- "read": Read messages from a specific session by its sessionID.
-
-Use this when the user references context you don't have — check recent sessions before saying you don't know.`,
+- search: Search all messages in the current session by keyword
+- recent: Get the N most recent messages (including compacted ones)
+- get: Get a specific range of messages by index`,
   parameters: z.object({
-    action: z.enum(["list", "read"]).describe("Whether to list sessions or read a specific session's messages"),
-    sessionID: z
-      .string()
-      .optional()
-      .describe("Session ID to read (required for 'read' action)"),
-    limit: z
-      .number()
-      .optional()
-      .describe("Number of sessions to list (default 10) or messages to read (default 20)"),
-    search: z
-      .string()
-      .optional()
-      .describe("Filter sessions by title (case-insensitive, only for 'list' action)"),
-    excludeSessionID: z
-      .string()
-      .optional()
-      .describe("Session ID to exclude from results (use this to skip the current session)"),
+    action: z.enum(["search", "recent", "get"]).describe("Action to perform"),
+    query: z.string().optional().describe("Search query (for 'search' action)"),
+    count: z.number().optional().describe("Number of messages to retrieve (default: 10)"),
+    offset: z.number().optional().describe("Start offset for 'get' action (0-indexed, 0 = oldest)"),
+    sessionID: z.string().optional().describe("Session ID to search (defaults to current session)"),
   }),
-  async execute(params, ctx) {
-    if (params.action === "list") {
-      const sessions: Session.Info[] = []
-      for (const session of Session.list({
-        directory: Instance.directory,
-        roots: true,
-        limit: (params.limit ?? 10) + (params.excludeSessionID ? 1 : 0),
-        search: params.search,
-      })) {
-        if (params.excludeSessionID && session.id === params.excludeSessionID) continue
-        sessions.push(session)
-      }
+  async execute(input: any, ctx: any) {
+    const sessionID = input.sessionID || ctx.sessionID
+    const count = input.count ?? 10
 
-      if (sessions.length === 0) {
-        return {
-          title: "No sessions found",
-          output: "No sessions found" + (params.search ? ` matching "${params.search}"` : ""),
-          metadata: { count: 0 },
+    // Get all messages from the session (from DB, including compacted)
+    const allMessages = await Session.messages({ sessionID, limit: 10000 })
+
+    const formatMessage = (msg: MessageV2.WithParts, idx: number) => {
+      const role = msg.info.role
+      const time = new Date(msg.info.time.created).toISOString()
+      const parts: string[] = []
+
+      for (const part of msg.parts) {
+        if (part.type === "text") {
+          parts.push(part.text)
+        } else if (part.type === "tool") {
+          const state = part.state
+          const toolName = part.tool
+          const input = "input" in state ? JSON.stringify(state.input).slice(0, 200) : ""
+          // Prefer original (pre-prune) output when available
+          const raw = state.status === "completed" ? ((state as any).original ?? state.output ?? "") : ""
+          const output = raw.slice(0, 500)
+          parts.push(`[Tool: ${toolName}] ${input}${output ? "\n→ " + output : ""}`)
+        } else if (part.type === "reasoning") {
+          // Skip reasoning parts
         }
       }
 
-      const lines = sessions.map((s) => {
-        const created = new Date(s.time.created).toLocaleString()
-        const updated = new Date(s.time.updated).toLocaleString()
-        return `- **${s.title || "(untitled)"}** (${s.id})\n  Created: ${created} | Updated: ${updated}`
-      })
+      if (parts.length === 0) return null
+      return `[${idx}] ${role} (${time}):\n${parts.join("\n")}`
+    }
 
+    if (input.action === "search") {
+      if (!input.query) return { title: "", metadata: {}, output: "Error: query is required for search action" }
+
+      const query = input.query.toLowerCase()
+      const keywords = query.split(/\s+/).filter(Boolean)
+      const matches: string[] = []
+
+      for (let i = 0; i < allMessages.length; i++) {
+        const msg = allMessages[i]
+        const formatted = formatMessage(msg, i)
+        if (!formatted) continue
+
+        const lower = formatted.toLowerCase()
+        if (keywords.some((k) => lower.includes(k))) {
+          matches.push(formatted)
+        }
+      }
+
+      const result = matches.slice(0, count)
       return {
-        title: `${sessions.length} sessions`,
-        output: `Found ${sessions.length} session(s):\n\n${lines.join("\n\n")}`,
-        metadata: { count: sessions.length },
+        title: "",
+        metadata: { totalMessages: allMessages.length, matchCount: matches.length },
+        output:
+          result.length > 0
+            ? `Found ${matches.length} matches (showing ${result.length}):\n\n${result.join("\n\n---\n\n")}`
+            : `No matches found for "${input.query}" in ${allMessages.length} messages.`,
       }
     }
 
-    // action === "read"
-    if (!params.sessionID) {
+    if (input.action === "recent") {
+      const recent = allMessages.slice(0, count)
+      const formatted = recent
+        .map((msg, i) => formatMessage(msg, allMessages.length - recent.length + i))
+        .filter(Boolean)
+
       return {
-        title: "Error",
-        output: "sessionID is required for 'read' action. Use action 'list' first to find session IDs.",
-        metadata: {},
+        title: "",
+        metadata: { totalMessages: allMessages.length },
+        output:
+          formatted.length > 0
+            ? `${formatted.length} most recent messages (of ${allMessages.length} total):\n\n${formatted.join("\n\n---\n\n")}`
+            : "No messages found.",
       }
     }
 
-    const messages = await Session.messages({ sessionID: params.sessionID })
-    if (!messages || messages.length === 0) {
+    if (input.action === "get") {
+      const offset = input.offset ?? 0
+      const slice = allMessages.slice(offset, offset + count)
+      const formatted = slice.map((msg, i) => formatMessage(msg, offset + i)).filter(Boolean)
+
       return {
-        title: "No messages",
-        output: `No messages found in session ${params.sessionID}`,
-        metadata: { count: 0 },
+        title: "",
+        metadata: { totalMessages: allMessages.length },
+        output:
+          formatted.length > 0
+            ? `Messages ${offset}-${offset + slice.length - 1} (of ${allMessages.length} total):\n\n${formatted.join("\n\n---\n\n")}`
+            : "No messages in that range.",
       }
     }
 
-    const limit = params.limit ?? 20
-    const recent = messages.slice(-limit)
-
-    const lines = recent.map((msg) => {
-      const role = msg.info.role === "user" ? "User" : "Assistant"
-      const time = msg.info.time?.created
-        ? new Date(msg.info.time.created).toLocaleString()
-        : ""
-
-      // Extract text content from parts
-      const textParts = msg.parts
-        .filter((p) => p.type === "text" && p.text)
-        .map((p) => (p as any).text as string)
-
-      // For tool parts, just show a brief summary
-      const toolParts = msg.parts
-        .filter((p) => p.type === "tool")
-        .map((p) => {
-          const tool = p as any
-          return `[Tool: ${tool.tool}]`
-        })
-
-      const content = [...textParts, ...toolParts].join("\n") || "(no text content)"
-
-      // Truncate long content
-      const maxLen = 500
-      const truncated = content.length > maxLen
-        ? content.slice(0, maxLen) + "... (truncated)"
-        : content
-
-      return `**${role}** ${time ? `(${time})` : ""}:\n${truncated}`
-    })
-
-    // Get session info for title
-    const session = await Session.get(params.sessionID)
-    const title = session?.title || params.sessionID
-
-    return {
-      title: `Session: ${title}`,
-      output: `Session: ${title}\nShowing last ${recent.length} of ${messages.length} messages:\n\n${lines.join("\n\n---\n\n")}`,
-      metadata: { count: recent.length, total: messages.length },
-    }
+    return { title: "", metadata: {}, output: "Unknown action" }
   },
 })

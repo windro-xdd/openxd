@@ -1075,6 +1075,11 @@ export function Prompt(props: PromptProps) {
                 </box>
                 <box flexDirection="row" gap={1} flexShrink={0}>
                   {(() => {
+                    const loopInfo = createMemo(() => {
+                      const s = status()
+                      if (s.type !== "loop") return
+                      return s
+                    })
                     const retry = createMemo(() => {
                       const s = status()
                       if (s.type !== "retry") return
@@ -1123,11 +1128,18 @@ export function Prompt(props: PromptProps) {
                     }
 
                     return (
-                      <Show when={retry()}>
-                        <box onMouseUp={handleMessageClick}>
-                          <text fg={theme.error}>{retryText()}</text>
-                        </box>
-                      </Show>
+                      <>
+                        <Show when={loopInfo()}>
+                          <text fg={theme.primary}>
+                            🔄 {loopInfo()!.mode} [{loopInfo()!.iteration}/{loopInfo()!.maxIterations}]
+                          </text>
+                        </Show>
+                        <Show when={retry()}>
+                          <box onMouseUp={handleMessageClick}>
+                            <text fg={theme.error}>{retryText()}</text>
+                          </box>
+                        </Show>
+                      </>
                     )
                   })()}
                 </box>

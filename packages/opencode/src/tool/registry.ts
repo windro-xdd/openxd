@@ -7,6 +7,7 @@ import { GrepTool } from "./grep"
 import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { OrchestratorTool, OrchestratorExecuteTool, OrchestratorStatusTool } from "./orchestrate"
 import { TodoWriteTool, TodoReadTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -34,6 +35,9 @@ import { SessionHistoryTool } from "./session-history"
 import { MemoryTool } from "./memory"
 import { MemorySearchTool } from "./memory-search"
 import { BrowserTool } from "./browser"
+import { TelegramTool } from "./telegram"
+import { AlsoTool } from "./also"
+import { ObservationSearchTool, ObservationGetTool } from "./observation_search"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -114,6 +118,9 @@ export namespace ToolRegistry {
       EditTool,
       WriteTool,
       TaskTool,
+      OrchestratorTool,
+      OrchestratorExecuteTool,
+      OrchestratorStatusTool,
       WebFetchTool,
       TodoWriteTool,
       // TodoReadTool,
@@ -125,6 +132,10 @@ export namespace ToolRegistry {
       MemoryTool,
       MemorySearchTool,
       BrowserTool,
+      TelegramTool,
+      AlsoTool,
+      ObservationSearchTool,
+      ObservationGetTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),

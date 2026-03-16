@@ -976,6 +976,22 @@ export function Session() {
         dialog.clear()
       }),
     },
+    {
+      title: "Set mode (ultrawork, search, analyze, plan)",
+      value: "session.mode",
+      category: "Session",
+      slash: {
+        name: "mode",
+      },
+      onSelect: (dialog) => {
+        toast.show({
+          message: "Type mode keyword to activate: ultrawork, search, analyze, plan",
+          variant: "info",
+          duration: 5000,
+        })
+        dialog.clear()
+      },
+    },
   ])
 
   const revertInfo = createMemo(() => session()?.revert)
@@ -1272,7 +1288,7 @@ function UserMessage(props: {
             backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
             flexShrink={0}
           >
-            <text fg={theme.text}>{text()?.text}</text>
+            <text fg={theme.text}>{text()?.text?.replace(/<think>[\s\S]*?<\/think>\s*/g, "")}</text>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
@@ -1455,17 +1471,13 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const stripped = createMemo(() => props.part.text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim())
   return (
-    <Show when={props.part.text.trim()}>
+    <Show when={stripped()}>
       <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
         <Switch>
           <Match when={Flag.OPENCODE_EXPERIMENTAL_MARKDOWN}>
-            <markdown
-              syntaxStyle={syntax()}
-              streaming={true}
-              content={props.part.text.trim()}
-              conceal={ctx.conceal()}
-            />
+            <markdown syntaxStyle={syntax()} streaming={true} content={stripped()} conceal={ctx.conceal()} />
           </Match>
           <Match when={!Flag.OPENCODE_EXPERIMENTAL_MARKDOWN}>
             <code
@@ -1473,7 +1485,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
               drawUnstyledText={false}
               streaming={true}
               syntaxStyle={syntax()}
-              content={props.part.text.trim()}
+              content={stripped()}
               conceal={ctx.conceal()}
               fg={theme.text}
             />
@@ -1568,6 +1580,12 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "skill"}>
           <Skill {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "browser"}>
+          <Browser {...toolprops} />
+        </Match>
+        <Match when={props.part.tool === "memory" || props.part.tool === "memory_search"}>
+          <Memory {...toolprops} />
+        </Match>
         <Match when={true}>
           <GenericTool {...toolprops} />
         </Match>
@@ -1584,6 +1602,23 @@ type ToolProps<T extends Tool.Info> = {
   output?: string
   part: ToolPart
 }
+function Memory(props: ToolProps<any>) {
+  const action = () => (props.input as any)?.action ?? "memory"
+  const file = () => (props.input as any)?.file ?? "MEMORY.md"
+  const label = () => {
+    const a = action()
+    if (a === "append" || a === "write" || a === "daily") return "Saved to memory"
+    if (a === "lesson") return "Lesson logged"
+    if (a === "read" || a === "list-daily") return `Reading ${file()}`
+    return `memory ${a}`
+  }
+  return (
+    <InlineTool icon="·" pending="Updating memory..." complete={true} part={props.part}>
+      {label()}
+    </InlineTool>
+  )
+}
+
 function GenericTool(props: ToolProps<any>) {
   const { theme } = useTheme()
   const ctx = use()
@@ -1944,6 +1979,61 @@ function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
     <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
       WebFetch {(props.input as any).url}
+    </InlineTool>
+  )
+}
+
+function Browser(props: ToolProps<any>) {
+  const input = props.input as any
+  const action = createMemo(() => input.action || "")
+  const detail = createMemo(() => {
+    switch (action()) {
+      case "open":
+        return `→ ${input.url || "new tab"}`
+      case "navigate":
+        return `→ ${input.url || ""}`
+      case "snapshot":
+        return ""
+      case "screenshot":
+        return ""
+      case "click":
+        return input.ref !== undefined ? `ref=${input.ref}` : input.text ? `"${input.text}"` : input.selector || ""
+      case "type":
+        return `${input.ref !== undefined ? `ref=${input.ref}` : ""} "${(input.text || "").slice(0, 40)}"`
+      case "select":
+        return `"${input.value || ""}"`
+      case "scroll":
+        return `${input.direction || "down"} ${input.amount || 500}px`
+      case "tabs":
+        return ""
+      case "tab.close":
+        return `#${input.tabId || ""}`
+      case "tab.focus":
+        return `#${input.tabId || ""}`
+      case "evaluate":
+        return `${(input.script || "").slice(0, 50)}`
+      default:
+        return ""
+    }
+  })
+  const icons: Record<string, string> = {
+    open: "·",
+    navigate: "↗",
+    snapshot: "·",
+    screenshot: "·",
+    click: "·",
+    type: "·",
+    select: "·",
+    scroll: "↕",
+    tabs: "·",
+    evaluate: "·",
+    "tab.close": "✕",
+    "tab.focus": "·",
+    console: ">",
+  }
+  return (
+    <InlineTool icon={icons[action()] || "·"} pending="Browser..." complete={true} part={props.part}>
+      {action() || "browser"} {detail()}
     </InlineTool>
   )
 }

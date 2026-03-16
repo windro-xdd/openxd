@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "command": {
+    "bbh-find": {
+      "description": "Find latest bug bounty programs across HackerOne, Bugcrowd, and Intigriti",
+      "template": "Search for the newest bug bounty programs across ALL platforms: HackerOne, Bugcrowd, and Intigriti. Use these APIs:\n\n1. **HackerOne** — POST to https://hackerone.com/graphql with query: `{ teams(first: 25, secure_order_by: { started_accepting_at: { _direction: DESC } }) { edges { node { handle name url offers_bounties started_accepting_at launched_at bounty_table { bounty_table_rows(first: 1) { edges { node { low high } } } } } } } }` — filter only `offers_bounties: true`\n\n2. **Bugcrowd** — GET https://bugcrowd.com/engagements.json?sort[]=newest&hidden[]=false&category=bug_bounty&page=1&limit=25 — list name, briefUrl, rewardSummary\n\n3. **Intigriti** — GET https://app.intigriti.com/api/core/public/programs?limit=25 — filter programs that have minBounty/maxBounty > 0\n\nSort results by launch date (newest first). For each program show:\n- Platform (H1/BC/IG)\n- Program name\n- Bounty range\n- Launch date / how long ago\n- Link\n- Whether it's likely less crowded (newer = less crowded)\n\nList the top 15-20 newest programs. $ARGUMENTS"
+    },
+    "bbh-find-h1": {
+      "description": "Find latest bug bounty programs on HackerOne only",
+      "template": "Search for the newest bug bounty programs on **HackerOne only**. POST to https://hackerone.com/graphql with this query:\n\n```\n{ teams(first: 25, secure_order_by: { started_accepting_at: { _direction: DESC } }) { edges { node { handle name url offers_bounties started_accepting_at launched_at bounty_table { bounty_table_rows(first: 1) { edges { node { low high } } } } } } } }\n```\n\nFilter only programs with `offers_bounties: true`. Sort by newest first. For each program show:\n- Program name\n- Bounty range (from bounty_table_rows low/high)\n- Launch date and how long ago\n- Direct link\n- Number of reports resolved if available\n\nList all bounty programs found. $ARGUMENTS"
+    },
+    "bbh-find-bc": {
+      "description": "Find latest bug bounty programs on Bugcrowd only",
+      "template": "Search for the newest bug bounty programs on **Bugcrowd only**. GET https://bugcrowd.com/engagements.json?sort[]=newest&hidden[]=false&category=bug_bounty&page=1&limit=25\n\nFor each program show:\n- Program name\n- Bounty range (from rewardSummary)\n- Access status (open/invite-only)\n- Link (https://bugcrowd.com + briefUrl)\n\nSort by newest first. List all bounty programs found. $ARGUMENTS"
+    },
+    "bbh-find-ig": {
+      "description": "Find latest bug bounty programs on Intigriti only",
+      "template": "Search for the newest bug bounty programs on **Intigriti only**. GET https://app.intigriti.com/api/core/public/programs?limit=25\n\nFilter programs that have minBounty or maxBounty > 0 (skip VDP/no-bounty). For each program show:\n- Program name\n- Company name\n- Bounty range (minBounty - maxBounty, in EUR)\n- Link (https://app.intigriti.com/researcher/programs/{companyHandle}/{handle}/detail)\n\nSort by newest first. List all bounty programs found. $ARGUMENTS"
+    }
+  }
+}

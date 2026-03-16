@@ -256,8 +256,40 @@ function App() {
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
 
+  // Track temporary sessions
+  const tempSessionIDs = new Set<string>()
+
   createEffect(() => {
     console.log(JSON.stringify(route.data))
+  })
+
+  // Auto-delete temp sessions when navigating away
+  createEffect(
+    on(
+      () => route.data,
+      (current, previous) => {
+        if (!previous) return
+        if (previous.type === "session" && tempSessionIDs.has(previous.sessionID)) {
+          const id = previous.sessionID
+          tempSessionIDs.delete(id)
+          // Delete asynchronously — fire and forget
+          sdk.client.session.delete({ sessionID: id }).catch(() => {})
+        }
+      },
+    ),
+  )
+
+  // Clean up temp sessions on app exit
+  onMount(() => {
+    const cleanup = () => {
+      for (const id of tempSessionIDs) {
+        sdk.client.session.delete({ sessionID: id }).catch(() => {})
+      }
+      tempSessionIDs.clear()
+    }
+    process.on("beforeExit", cleanup)
+    process.on("SIGINT", cleanup)
+    process.on("SIGTERM", cleanup)
   })
 
   // Update terminal window title based on current route and session
@@ -357,6 +389,7 @@ function App() {
   )
 
   const connected = useConnected()
+  const [fallbackOn, setFallbackOn] = createSignal(sync.data.config.rateLimitFallback?.enabled ?? false)
   command.register(() => [
     {
       title: "Switch session",
@@ -410,6 +443,43 @@ function App() {
           workspaceID,
         })
         dialog.clear()
+      },
+    },
+    {
+      title: "Temporary session",
+      suggested: false,
+      value: "session.temp",
+      category: "Session",
+      slash: {
+        name: "temp",
+        aliases: ["scratch"],
+      },
+      onSelect: async () => {
+        const current = promptRef.current
+        const currentPrompt = current?.current?.input ? current.current : undefined
+        const workspaceID =
+          route.data.type === "session" ? sync.session.get(route.data.sessionID)?.workspaceID : undefined
+        // Create a session immediately and mark it as temp
+        const res = await sdk.client.session.create({
+          title: "🗑️ Temporary session",
+          workspaceID,
+        })
+        if (res.error) {
+          toast.show({ message: "Failed to create temp session", variant: "error" })
+          return
+        }
+        tempSessionIDs.add(res.data.id)
+        route.navigate({
+          type: "session",
+          sessionID: res.data.id,
+          initialPrompt: currentPrompt,
+        })
+        dialog.clear()
+        toast.show({
+          message: "Temp session — will be deleted when you leave",
+          variant: "info",
+          duration: 3000,
+        })
       },
     },
     {
@@ -608,6 +678,38 @@ function App() {
       value: "app.console",
       onSelect: (dialog) => {
         renderer.console.toggle()
+        dialog.clear()
+      },
+    },
+    {
+      title: `Rate limit fallback: ${fallbackOn() ? "ON — click to disable" : "OFF — click to enable"}`,
+      description: "Auto-switch models when rate limited — enable before leaving agent unattended",
+      category: "System",
+      value: "app.ratelimit_fallback",
+      slash: {
+        name: "fallback",
+        aliases: ["fallback-on", "fallback-off"],
+      },
+      onSelect: async (dialog) => {
+        const next = !fallbackOn()
+        const models = sync.data.config.rateLimitFallback?.models ?? [
+          "github-copilot/claude-opus-4.6",
+          "github-copilot/claude-sonnet-4.6",
+          "github-copilot/claude-opus-4.5",
+          "github-copilot/claude-sonnet-4.5",
+          "github-copilot/gpt-5.3-codex",
+          "github-copilot/gpt-5.4",
+        ]
+        setFallbackOn(next)
+        await sdk.client.config.update({
+          ...sync.data.config,
+          rateLimitFallback: { enabled: next, models },
+        } as any)
+        toast.show({
+          variant: "info",
+          message: `Rate limit fallback ${next ? "enabled" : "disabled"}`,
+          duration: 3000,
+        })
         dialog.clear()
       },
     },

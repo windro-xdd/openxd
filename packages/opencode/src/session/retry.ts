@@ -98,4 +98,23 @@ export namespace SessionRetry {
       return undefined
     }
   }
+
+  /**
+   * Returns true if the error is specifically a rate limit (429 / too_many_requests).
+   * Used to decide whether to cycle to a fallback model instead of sleeping.
+   */
+  export function isRateLimit(error: ReturnType<NamedError["toObject"]>): boolean {
+    if (MessageV2.APIError.isInstance(error)) {
+      if (error.data.statusCode === 429) return true
+      const msg = error.data.message?.toLowerCase() ?? ""
+      if (msg.includes("rate limit") || msg.includes("too many requests")) return true
+    }
+    try {
+      const json = typeof error.data?.message === "string" ? JSON.parse(error.data.message) : undefined
+      if (!json) return false
+      if (json.type === "error" && json.error?.type === "too_many_requests") return true
+      if (json.type === "error" && json.error?.code?.includes("rate_limit")) return true
+    } catch {}
+    return false
+  }
 }

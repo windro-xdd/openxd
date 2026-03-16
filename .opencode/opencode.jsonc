@@ -9,10 +9,66 @@
     "edit": {
       "packages/opencode/migration/*": "deny",
     },
+    "external_directory": {
+      "~/bbh/*": "allow",
+    },
   },
-  "mcp": {},
+  "mcp": {
+    "figma": {
+      "type": "local",
+      "command": ["npx", "figma-developer-mcp"],
+      "environment": {
+        "FIGMA_API_KEY": "figd_5rUrEHG5vtD9xIraQ5KvmuCquFs_vDb5a26w7qG6"
+      }
+    }
+  },
   "tools": {
     "github-triage": false,
     "github-pr-search": false,
+  },
+  "telegram": {
+    "botToken": "8337969780:AAG3GqfseS0FDHNOK2QDtNkhnglYeQVks_M",
+    "allowedUsers": []
+  },
+  "daemon": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalMinutes": 30,
+      "quietHours": {
+        "start": "23:00",
+        "end": "08:00"
+      }
+    }
+  },
+  "browser": {
+    "cdp": {
+      "port": 9222
+    }
+  },
+  "command": {
+    "bbh-find": {
+      "description": "Find latest bounty programs across HackerOne, Bugcrowd & Intigriti",
+      "template": "Find newest bug bounty programs across ALL platforms. Use the Bash tool (NOT WebFetch) for all API calls.\n\n1. HackerOne: `curl -s -X POST 'https://hackerone.com/graphql' -H 'Content-Type: application/json' -d '{\"query\":\"{ teams(first: 25, secure_order_by: { started_accepting_at: { _direction: DESC } }) { edges { node { handle name url offers_bounties started_accepting_at launched_at bounty_table { bounty_table_rows(first: 1) { edges { node { low high } } } } } } } }\"}' | python3 -m json.tool` — filter offers_bounties: true only\n\n2. Bugcrowd: `curl -s 'https://bugcrowd.com/engagements.json?sort[]=newest&hidden[]=false&category=bug_bounty&page=1&limit=25' | python3 -m json.tool`\n\n3. Intigriti: `curl -s 'https://app.intigriti.com/api/core/public/programs?limit=25' -H 'Accept: application/json' | python3 -m json.tool` — filter programs with minBounty/maxBounty > 0\n\nRun all 3 curl commands. Sort results by launch date (newest first). Show: Platform (H1/BC/IG), Name, Bounty range, Launch date, Link. List top 15-20. $ARGUMENTS"
+    },
+    "bbh-find-h1": {
+      "description": "Find latest bounty programs on HackerOne only",
+      "template": "Find newest bug bounty programs on HackerOne. Use the Bash tool (NOT WebFetch). Run: `curl -s -X POST 'https://hackerone.com/graphql' -H 'Content-Type: application/json' -d '{\"query\":\"{ teams(first: 25, secure_order_by: { started_accepting_at: { _direction: DESC } }) { edges { node { handle name url offers_bounties started_accepting_at launched_at bounty_table { bounty_table_rows(first: 1) { edges { node { low high } } } } } } } }\"}' | python3 -m json.tool` — filter offers_bounties: true only. Show: Name, Bounty range, Launch date, Link. $ARGUMENTS"
+    },
+    "bbh-find-bc": {
+      "description": "Find latest bounty programs on Bugcrowd only",
+      "template": "Find newest bug bounty programs on Bugcrowd. Use the Bash tool (NOT WebFetch). Run: `curl -s 'https://bugcrowd.com/engagements.json?sort[]=newest&hidden[]=false&category=bug_bounty&page=1&limit=25' | python3 -m json.tool`. Show: Name, Bounty range (rewardSummary.summary), Access status, Link (https://bugcrowd.com + briefUrl). $ARGUMENTS"
+    },
+    "bbh-find-ig": {
+      "description": "Find latest bounty programs on Intigriti only",
+      "template": "Find newest bug bounty programs on Intigriti. Use the Bash tool (NOT WebFetch). Run: `curl -s 'https://app.intigriti.com/api/core/public/programs?limit=25' -H 'Accept: application/json' | python3 -m json.tool` — filter programs with minBounty/maxBounty > 0. Show: Name, Company, Bounty range (EUR), Link. $ARGUMENTS"
+    },
+    "bbh-start": {
+      "description": "Start hunting a program from bbh-find results",
+      "template": "You are an elite bug bounty hunter. Your goal is to find HIGH/CRITICAL severity vulnerabilities with PROVEN, DEMONSTRABLE impact — not theories, not maybes, not informational findings. Every finding must be reproducible with 80-90% certainty. If you can't prove it, don't report it.\n\nTarget program: $ARGUMENTS\n\n## Step 0 — Resolve the Program\nThis name came from /bbh-find. Find which platform it's on using Bash (NOT WebFetch):\n1. `curl -s -X POST 'https://hackerone.com/graphql' -H 'Content-Type: application/json' -d '{\"query\":\"{ teams(first: 50, secure_order_by: { started_accepting_at: { _direction: DESC } }) { edges { node { handle name url offers_bounties } } } }\"}' | python3 -c \"import sys,json; [print(n['node']['handle'],n['node']['name'],n['node']['url']) for n in json.load(sys.stdin)['data']['teams']['edges'] if n['node']['offers_bounties']]\"` — match by name\n2. If not H1: `curl -s 'https://bugcrowd.com/engagements.json?sort[]=newest&hidden[]=false&category=bug_bounty&page=1&limit=50' | python3 -c \"import sys,json; [print(e['name'],e['briefUrl']) for e in json.load(sys.stdin)['engagements']]\"` — match\n3. If not BC: `curl -s 'https://app.intigriti.com/api/core/public/programs?limit=50' -H 'Accept: application/json' | python3 -c \"import sys,json; [print(p['name'],p['companyHandle'],p['handle']) for p in json.load(sys.stdin)]\"` — match\n\n## Step 1 — Workspace + Scope\n1. `mkdir -p ~/bbh/[handle]-bbh-folder/{recon,reports,evidence,scripts}`\n2. Scrape the program page with curl. Extract EVERY detail: all in-scope domains/IPs/apps/APIs, out-of-scope, bounty table, response targets, what they care about, what they DON'T want\n3. Write `PROGRAM.md` with full scope breakdown\n\n## Step 2 — Deep Reconnaissance (sequential, save everything to recon/)\n```\nsubfinder -d [domain] -all -o recon/subdomains.txt\n~/go/bin/httpx -l recon/subdomains.txt -o recon/live-hosts.txt -sc -cl -ct -title -tech-detect -follow-redirects\nnmap -sV -sC -T4 --top-ports 1000 -oN recon/nmap-scan.txt [key-hosts]\nffuf -w /usr/share/seclists/Discovery/Web-Content/common.txt -u https://[domain]/FUZZ -o recon/dirs.json -of json -fc 404\nnuclei -l recon/live-hosts.txt -o recon/nuclei-results.txt -severity low,medium,high,critical\n```\n\nBut DON'T STOP at tool output. Go further:\n- Enumerate ALL API endpoints manually: check /api, /v1, /v2, /graphql, /swagger, /openapi.json, /.well-known/\n- Find hidden endpoints in JavaScript bundles: `curl` JS files, grep for URLs, API keys, secrets, internal paths\n- Check for exposed config: /.env, /config.json, /.git/HEAD, /debug, /actuator, /server-status, /phpinfo\n- Look at response headers for tech stack, CDN, WAF info\n- Check CORS: `curl -s -I -H 'Origin: https://evil.com' [url]` — look for `Access-Control-Allow-Origin: *` or reflection\n- Check for open redirects in login/OAuth flows\n- Test for SSRF in any URL-accepting parameter\n- Check for path traversal in file download/upload endpoints\n- Map ALL authentication flows: login, signup, password reset, OAuth, API keys, JWT\n\n## Step 3 — Attack Surface Analysis\nWrite `recon/ANALYSIS.md` covering:\n- Full tech stack map\n- Authentication architecture\n- Every API endpoint found with methods + params\n- Data flow: what user data goes where\n- Trust boundaries: what's client-validated vs server-validated\n- Payment/financial flows if any\n- Role/permission model\n- File upload/download functionality\n- Third-party integrations\n\n## Step 4 — Hunt Like a Criminal (THIS IS WHERE BUGS LIVE)\nFor each attack vector, TEST IT. Don't theorize — PROVE IT:\n\n**Auth & Access Control:**\n- IDOR: swap every user ID, UUID, email in EVERY request that returns user-specific data. Test with 2 accounts.\n- Privilege escalation: can regular user hit admin endpoints? Change role params? Access other orgs?\n- JWT attacks: decode the token, check algorithm confusion (none/HS256), weak secrets, expiry bypass\n- Password reset: token predictability, rate limiting, account enumeration\n- OAuth: state parameter missing? redirect_uri manipulation? token leakage in referrer?\n\n**Business Logic (where P1s hide):**\n- Payment bypass: change price/quantity/currency in requests, negative amounts, race conditions on checkout\n- Rate limiting: can you brute force OTP/passwords? Test with concurrent requests\n- State machine abuse: skip steps in multi-step flows (verification, payment, approval)\n- Mass assignment: add admin=true, role=admin, is_verified=true to registration/profile update\n- Race conditions: `for i in $(seq 1 50); do curl -s [endpoint] & done` — simultaneous requests on state-changing operations\n\n**Injection & Server-Side:**\n- SSTI: test `{{7*7}}`, `${7*7}`, `<%= 7*7 %>` in every input field that gets reflected\n- SSRF: any parameter that takes a URL — try `http://169.254.169.254/latest/meta-data/`, `http://localhost:PORT`\n- XXE: any XML input — test with external entity payloads\n- SQL injection: `' OR 1=1--`, time-based blind on search/filter params\n- Command injection: `; id`, `| id`, `$(id)` in any parameter that might hit a shell\n\n**Data Exposure:**\n- GraphQL introspection: `{__schema{types{name,fields{name}}}}`\n- API response over-exposure: does the API return more data than the UI shows?\n- Debug endpoints: /debug, /trace, /metrics, /health with sensitive info\n- Error messages: trigger errors, check for stack traces, SQL queries, internal paths\n\n## Step 5 — Validate & Document\nFor EVERY potential finding:\n1. Reproduce it 3 times minimum\n2. Document exact steps with curl commands\n3. Save HTTP requests/responses to `evidence/`\n4. Calculate REAL impact — not theoretical. What can an attacker ACTUALLY do?\n5. Write PoC script in `scripts/` if applicable\n6. Check if it's likely a duplicate: search disclosed reports on the platform\n7. Only proceed to report if impact is HIGH or CRITICAL and you're 80%+ confident\n\n## RULES\n- Use Bash for ALL HTTP calls, NOT WebFetch\n- NEVER report: missing headers (CSP, HSTS), clickjacking on non-sensitive pages, self-XSS, logout CSRF, SPF/DKIM issues, rate limiting on non-critical endpoints, publicly known CVEs without proven exploit\n- ONE finding fully proven > TEN theories\n- If you find something, CHAIN IT. IDOR alone is medium — IDOR + data exfiltration + account takeover is critical\n- Think about what the DEVELOPER forgot, not what the scanner found\n- Check hacktivity/disclosed reports on the program BEFORE testing to avoid known duplicates\n- Go phase by phase. Do NOT skip ahead. Analyze results before deciding next steps."
+    },
+    "bbh-continue": {
+      "description": "Resume bug bounty hunting on an existing target",
+      "template": "Resume the bug bounty hunting session. $ARGUMENTS\n\n1. First, find existing BBH workspaces: `ls ~/bbh/`\n2. If the user specified a target, `cd` into that workspace. Otherwise list available workspaces and ask.\n3. Read `PROGRAM.md` to recall scope and rules\n4. Read `recon/ANALYSIS.md` if it exists to recall previous findings\n5. Check `reports/` and `evidence/` for what's already been found\n6. Read any existing notes or findings files\n7. Summarize the current state: what's been done, what's been found, what's left to explore\n8. Continue hunting from where we left off — pick up the next logical phase or dig deeper into existing findings\n\nIMPORTANT: Go DEEP. Don't repeat work already done. Focus on unexplored attack surface. Chain findings for maximum impact."
+    }
   },
 }
