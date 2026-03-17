@@ -31,48 +31,10 @@ jobs:
             echo "New version v$version — building"
           fi
 
-  create-release:
+  build:
     needs: check
     if: needs.check.outputs.skip == 'false'
     runs-on: ubuntu-latest
-    steps:
-      - name: Create draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "v${{ needs.check.outputs.version }}" \
-            --repo ${{ github.repository }} \
-            --title "v${{ needs.check.outputs.version }}" \
-            --draft \
-            --generate-notes
-
-  build:
-    needs: [check, create-release]
-    if: needs.check.outputs.skip == 'false'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: ubuntu-latest
-            target: linux-x64-baseline
-            baseline: true
-          - os: ubuntu-24.04-arm
-            target: linux-arm64
-          - os: macos-latest
-            target: darwin-arm64
-          - os: macos-latest
-            target: darwin-x64
-          - os: macos-latest
-            target: darwin-x64-baseline
-            baseline: true
-          - os: windows-latest
-            target: windows-x64
-          - os: windows-latest
-            target: windows-x64-baseline
-            baseline: true
-    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,24 +45,20 @@ jobs:
       - name: Install deps
         run: bun install
 
-      - name: Build + upload
-        run: bun run ./packages/opencode/script/build.ts --single ${{ matrix.baseline && '--baseline' || '' }}
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ needs.check.outputs.version }}" \
+            --repo ${{ github.repository }} \
+            --title "v${{ needs.check.outputs.version }}" \
+            --generate-notes
+
+      - name: Build all platforms and upload
+        run: bun run ./packages/opencode/script/build.ts
         env:
           OPENCODE_RELEASE: "1"
           OPENCODE_VERSION: ${{ needs.check.outputs.version }}
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  publish:
-    needs: [check, build]
-    if: needs.check.outputs.skip == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release edit "v${{ needs.check.outputs.version }}" \
-            --repo ${{ github.repository }} \
-            --draft=false
