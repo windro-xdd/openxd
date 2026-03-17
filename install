@@ -396,6 +396,23 @@ case $current_shell in
 esac
 
 if [[ "$no_modify_path" != "true" ]]; then
+    # On Windows (Git Bash / MSYS2 / Cygwin), also add to the Windows user PATH via PowerShell
+    if [[ "$os" == "windows" ]]; then
+        win_install_dir=$(cygpath -w "$INSTALL_DIR" 2>/dev/null || echo "$INSTALL_DIR" | sed 's|/\([a-zA-Z]\)/|\1:\\|;s|/|\\|g')
+        ps_cmd="[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$win_install_dir', 'User')"
+        if command -v powershell.exe >/dev/null 2>&1; then
+            powershell.exe -NoProfile -NonInteractive -Command "$ps_cmd" 2>/dev/null && \
+                print_message info "Added openxd to Windows user PATH (restart CMD/PowerShell to use)" || \
+                print_message warning "Could not add to Windows PATH automatically. Add manually: $win_install_dir"
+        elif command -v pwsh >/dev/null 2>&1; then
+            pwsh -NoProfile -NonInteractive -Command "$ps_cmd" 2>/dev/null && \
+                print_message info "Added openxd to Windows user PATH (restart CMD/PowerShell to use)" || \
+                print_message warning "Could not add to Windows PATH automatically. Add manually: $win_install_dir"
+        else
+            print_message warning "Add to Windows PATH manually: $win_install_dir"
+        fi
+    fi
+
     config_file=""
     for file in $config_files; do
         if [[ -f $file ]]; then
