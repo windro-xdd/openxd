@@ -41,6 +41,8 @@ import { AlsoTool } from "./also"
 import { ObservationSearchTool, ObservationGetTool } from "./observation_search"
 import { BatchEditTool } from "./batch_edit"
 import { DepsTool } from "./deps"
+import { RepomapTool } from "./repomap"
+import { ListTool } from "./ls"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -116,6 +118,7 @@ export namespace ToolRegistry {
       ...(question ? [QuestionTool] : []),
       BashTool,
       ReadTool,
+      ListTool,
       GlobTool,
       GrepTool,
       EditTool,
@@ -142,6 +145,7 @@ export namespace ToolRegistry {
       SymbolsTool,
       BatchEditTool,
       DepsTool,
+      RepomapTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
