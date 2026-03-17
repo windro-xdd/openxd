@@ -8,6 +8,11 @@ export namespace SessionRetry {
   export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
   export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
 
+  function clamp(ms: number) {
+    if (!Number.isFinite(ms) || ms <= 0) return undefined
+    return Math.min(Math.ceil(ms), RETRY_MAX_DELAY)
+  }
+
   export async function sleep(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const abortHandler = () => {
@@ -32,22 +37,23 @@ export namespace SessionRetry {
         const retryAfterMs = headers["retry-after-ms"]
         if (retryAfterMs) {
           const parsedMs = Number.parseFloat(retryAfterMs)
-          if (!Number.isNaN(parsedMs)) {
-            return parsedMs
+          const ms = clamp(parsedMs)
+          if (ms) {
+            return ms
           }
         }
 
         const retryAfter = headers["retry-after"]
         if (retryAfter) {
           const parsedSeconds = Number.parseFloat(retryAfter)
-          if (!Number.isNaN(parsedSeconds)) {
-            // convert seconds to milliseconds
-            return Math.ceil(parsedSeconds * 1000)
+          const seconds = clamp(parsedSeconds * 1000)
+          if (seconds) {
+            return seconds
           }
           // Try parsing as HTTP date format
-          const parsed = Date.parse(retryAfter) - Date.now()
-          if (!Number.isNaN(parsed) && parsed > 0) {
-            return Math.ceil(parsed)
+          const parsed = clamp(Date.parse(retryAfter) - Date.now())
+          if (parsed) {
+            return parsed
           }
         }
 
