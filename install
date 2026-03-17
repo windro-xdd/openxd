@@ -181,7 +181,8 @@ else
         specific_version=$(curl -s https://api.github.com/repos/windro-xdd/openxd/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
         if [[ $? -ne 0 || -z "$specific_version" ]]; then
-            echo -e "${RED}Failed to fetch version information${NC}"
+            echo -e "${RED}No releases found yet.${NC}"
+            echo -e "${MUTED}Check https://github.com/windro-xdd/openxd/releases${NC}"
             exit 1
         fi
     else
