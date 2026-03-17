@@ -34,6 +34,7 @@ export namespace SessionProcessor {
     let blocked = false
     let attempt = 0
     let needsCompaction = false
+    let model = input.model
 
     const result = {
       get message() {
@@ -45,7 +46,10 @@ export namespace SessionProcessor {
       async process(streamInput: LLM.StreamInput) {
         log.info("process")
         needsCompaction = false
-        const shouldBreak = (await Config.get()).experimental?.continue_loop_on_deny !== true
+        const cfg = await Config.get()
+        const shouldBreak = cfg.experimental?.continue_loop_on_deny !== true
+        const max = cfg.experimental?.retry_attempts ?? 8
+        streamInput.model = model
         while (true) {
           try {
             let currentText: MessageV2.TextPart | undefined
@@ -243,7 +247,7 @@ export namespace SessionProcessor {
 
                 case "finish-step":
                   const usage = Session.getUsage({
-                    model: input.model,
+                    model,
                     usage: value.usage,
                     metadata: value.providerMetadata,
                   })
@@ -281,7 +285,7 @@ export namespace SessionProcessor {
                   })
                   if (
                     !input.assistantMessage.summary &&
-                    (await SessionCompaction.isOverflow({ tokens: usage.tokens, model: input.model }))
+                    (await SessionCompaction.isOverflow({ tokens: usage.tokens, model }))
                   ) {
                     needsCompaction = true
                   }
@@ -355,7 +359,7 @@ export namespace SessionProcessor {
               error: e,
               stack: JSON.stringify(e.stack),
             })
-            const error = MessageV2.fromError(e, { providerID: input.model.providerID })
+            const error = MessageV2.fromError(e, { providerID: model.providerID })
             if (MessageV2.ContextOverflowError.isInstance(error)) {
               needsCompaction = true
               Bus.publish(Session.Event.Error, {
@@ -366,47 +370,56 @@ export namespace SessionProcessor {
               const retry = SessionRetry.retryable(error)
               if (retry !== undefined) {
                 attempt++
-
-                // Fallback cycle — for rate-limit OR unsupported model errors
-                if (SessionRetry.isRateLimit(error) || SessionRetry.isModelUnsupported(error)) {
-                  const cfg = await Config.get()
-                  const fallback = cfg.rateLimitFallback
-                  if (fallback?.enabled && fallback.models?.length) {
-                    const models = fallback.models
-                    const cur = streamInput.model.id
-                    const idx = models.indexOf(cur)
-                    const nextID = idx === -1 || idx === models.length - 1 ? models[0] : models[idx + 1]
-                    if (nextID && nextID !== cur) {
-                      // model IDs in config are "providerID/modelID"
-                      const slash = nextID.indexOf("/")
-                      const providerID = slash === -1 ? nextID : nextID.slice(0, slash)
-                      const modelID = slash === -1 ? nextID : nextID.slice(slash + 1)
-                      const next = await Provider.getModel(providerID, modelID).catch(() => undefined)
-                      if (next) {
-                        const reason = SessionRetry.isRateLimit(error) ? "rate limited" : "model unsupported"
-                        log.info("rate-limit-fallback", { from: cur, to: nextID, reason })
-                        streamInput.model = next
-                        SessionStatus.set(input.sessionID, {
-                          type: "retry",
-                          attempt,
-                          message: `${reason} on ${cur} - switching to ${nextID}`,
-                          next: Date.now(),
-                        })
-                        continue
+                if (attempt >= max) {
+                  log.warn("retry-cap-reached", { attempt, max, model: model.id })
+                  input.assistantMessage.error = error
+                  Bus.publish(Session.Event.Error, {
+                    sessionID: input.assistantMessage.sessionID,
+                    error: input.assistantMessage.error,
+                  })
+                  SessionStatus.set(input.sessionID, { type: "idle" })
+                } else {
+                  // Fallback cycle — for rate-limit OR unsupported model errors
+                  if (SessionRetry.isRateLimit(error) || SessionRetry.isModelUnsupported(error)) {
+                    const fallback = cfg.rateLimitFallback
+                    if (fallback?.enabled && fallback.models?.length) {
+                      const models = fallback.models
+                      const cur = model.id
+                      const idx = models.indexOf(cur)
+                      const nextID = idx === -1 || idx === models.length - 1 ? models[0] : models[idx + 1]
+                      if (nextID && nextID !== cur) {
+                        // model IDs in config are "providerID/modelID"
+                        const slash = nextID.indexOf("/")
+                        const providerID = slash === -1 ? nextID : nextID.slice(0, slash)
+                        const modelID = slash === -1 ? nextID : nextID.slice(slash + 1)
+                        const next = await Provider.getModel(providerID, modelID).catch(() => undefined)
+                        if (next) {
+                          const reason = SessionRetry.isRateLimit(error) ? "rate limited" : "model unsupported"
+                          log.info("rate-limit-fallback", { from: cur, to: nextID, reason })
+                          model = next
+                          streamInput.model = next
+                          SessionStatus.set(input.sessionID, {
+                            type: "retry",
+                            attempt,
+                            message: `${reason} on ${cur} - switching to ${nextID}`,
+                            next: Date.now(),
+                          })
+                          continue
+                        }
                       }
                     }
                   }
-                }
 
-                const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
-                SessionStatus.set(input.sessionID, {
-                  type: "retry",
-                  attempt,
-                  message: retry,
-                  next: Date.now() + delay,
-                })
-                await SessionRetry.sleep(delay, input.abort).catch(() => {})
-                continue
+                  const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
+                  SessionStatus.set(input.sessionID, {
+                    type: "retry",
+                    attempt,
+                    message: retry,
+                    next: Date.now() + delay,
+                  })
+                  await SessionRetry.sleep(delay, input.abort).catch(() => {})
+                  continue
+                }
               }
               input.assistantMessage.error = error
               Bus.publish(Session.Event.Error, {

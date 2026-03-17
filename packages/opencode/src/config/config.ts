@@ -722,6 +722,12 @@ export namespace Config {
         .object({
           disable_paste_summary: z.boolean().optional(),
           batch_tool: z.boolean().optional().describe("Enable the batch tool"),
+          retry_attempts: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Maximum retry attempts for retryable session errors (default: 8)"),
           openTelemetry: z
             .boolean()
             .optional()
