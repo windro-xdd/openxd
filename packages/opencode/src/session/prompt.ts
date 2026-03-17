@@ -28,6 +28,7 @@ import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ulid } from "ulid"
+import { buildRepomap } from "../tool/repomap"
 import { spawn } from "child_process"
 import { Command } from "../command"
 import { $ } from "bun"
@@ -161,6 +162,37 @@ export namespace SessionPrompt {
   })
   export type PromptInput = z.infer<typeof PromptInput>
 
+  function sameRule(a: PermissionNext.Rule, b: PermissionNext.Rule) {
+    return a.permission === b.permission && a.action === b.action && a.pattern === b.pattern
+  }
+
+  function stripModeDenies(rules: PermissionNext.Ruleset, mode: Mode.Info) {
+    const modeRules = Mode.resolvePermissions(mode)
+    if (modeRules.length === 0) return rules
+    if (rules.length < modeRules.length) return rules
+    const start = rules.length - modeRules.length
+    const match = modeRules.every((rule, i) => {
+      const current = rules[start + i]
+      if (!current) return false
+      return sameRule(rule, current)
+    })
+    if (!match) return rules
+    return rules.filter((_, i) => {
+      if (i < start) return true
+      return modeRules[i - start]?.action !== "deny"
+    })
+  }
+
+  async function stripStaleModeDenies(rules: PermissionNext.Ruleset) {
+    let next = rules
+    for (const mode of await Mode.list()) {
+      const cleaned = stripModeDenies(next, mode)
+      if (cleaned.length !== next.length) return cleaned
+      next = cleaned
+    }
+    return next
+  }
+
   export const prompt = fn(PromptInput, async (input) => {
     const session = await Session.get(input.sessionID)
     await SessionRevert.cleanup(session)
@@ -184,6 +216,37 @@ export namespace SessionPrompt {
           sessionID: input.sessionID,
           mode: activeMode.name,
         })
+      }
+    } else {
+      // Clear any previously active mode when the new message doesn't trigger one
+      const prev = Mode.getActive(input.sessionID)
+      if (prev) {
+        log.info("mode deactivated", { mode: prev, sessionID: input.sessionID })
+        Mode.clearActive(input.sessionID)
+        const mode = await Mode.get(prev)
+        if (mode) {
+          const current = session.permission ?? []
+          const cleaned = stripModeDenies(current, mode)
+          if (cleaned.length !== current.length) {
+            session.permission = cleaned
+            await Session.setPermission({ sessionID: session.id, permission: cleaned })
+          }
+        }
+        Bus.publish(Mode.Event.Deactivated, {
+          sessionID: input.sessionID,
+          mode: prev,
+        })
+      } else {
+        // Daemon restart / reconnect case: in-memory mode state is lost but DB may still
+        // have mode-injected deny rules (e.g. from a previous plan/search/analyze mode).
+        // Clear stale deny rules if no mode is currently active.
+        const current = session.permission ?? []
+        const cleaned = await stripStaleModeDenies(current)
+        if (cleaned.length !== current.length) {
+          log.info("clearing stale mode-injected deny rules", { sessionID: input.sessionID })
+          session.permission = cleaned
+          await Session.setPermission({ sessionID: session.id, permission: cleaned })
+        }
       }
     }
 
@@ -309,10 +372,17 @@ export namespace SessionPrompt {
       SessionStatus.set(sessionID, { type: "idle" })
       return
     }
+    const pending = match.callbacks.splice(0)
     match.abort.abort()
     delete s[sessionID]
     SessionStatus.set(sessionID, { type: "idle" })
-    return
+    // Re-queue pending messages so they get their own loop iteration
+    if (pending.length > 0) {
+      log.info("re-queuing pending messages after cancel", { sessionID, count: pending.length })
+      for (const cb of pending) {
+        loop({ sessionID }).then(cb.resolve, cb.reject)
+      }
+    }
   }
 
   export const LoopInput = z.object({
@@ -737,6 +807,22 @@ export namespace SessionPrompt {
         }
       }
 
+      // === REPO MAP INJECTION ===
+      // Auto-inject codebase structure map for non-subagent primary agents.
+      // Skipped for compaction/title/summary/planner/explore agents (mode: subagent).
+      // Uses a 300ms timeout — on slow filesystems (Windows) we skip rather than block.
+      if (agent.mode !== "subagent") {
+        const map = await Promise.race([
+          buildRepomap({ max_files: 150 }).catch(() => ""),
+          new Promise<string>((resolve) => setTimeout(() => resolve(""), 300)),
+        ])
+        if (map) {
+          system.push(
+            `<repo-map>\nHere is a structural map of the codebase (top-level symbols per file). Use this to understand what exists before searching.\n\n${map}\n</repo-map>`,
+          )
+        }
+      }
+
       effectiveMsgs = await applyTokenPreflight({
         model,
         sessionID,
@@ -848,9 +934,10 @@ export namespace SessionPrompt {
     SessionCompaction.prune({ sessionID })
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
-      const queued = state()[sessionID]?.callbacks ?? []
+      // Each queued message needs its own loop iteration
+      const queued = (state()[sessionID]?.callbacks ?? []).splice(0)
       for (const q of queued) {
-        q.resolve(item)
+        loop({ sessionID }).then(q.resolve, q.reject)
       }
       return item
     }
