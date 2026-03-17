@@ -21,6 +21,17 @@ declare global {
 
 type RpcClient = ReturnType<typeof Rpc.client<typeof rpc>>
 
+function usable(url?: string) {
+  if (!url) return false
+  try {
+    const next = new URL(url)
+    if (next.protocol !== "http:" && next.protocol !== "https:") return false
+    return Boolean(next.hostname)
+  } catch {
+    return false
+  }
+}
+
 function createWorkerFetch(client: RpcClient): typeof fetch {
   const fn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init)
@@ -197,6 +208,28 @@ export const TuiThreadCommand = cmd({
         }
       }
 
+      // On Windows, always use a local HTTP server instead of the worker RPC fetch bridge.
+      // The RPC bridge buffers entire responses before delivering them — killing streaming.
+      // A loopback HTTP server gives real SSE streaming even on Windows.
+      const useLocalServer = !daemonUrl && !external && process.platform === "win32"
+      if (useLocalServer) {
+        try {
+          const srv = await client.call("server", { port: 0, hostname: "127.0.0.1" })
+          if (usable(srv.url)) {
+            daemonUrl = srv.url
+            Log.Default.info("windows: using local HTTP server for streaming", { url: daemonUrl })
+          } else {
+            Log.Default.warn("windows: local HTTP bootstrap returned unusable url, falling back to rpc bridge", {
+              url: srv.url,
+            })
+          }
+        } catch (err) {
+          Log.Default.warn("windows: local HTTP bootstrap failed, falling back to rpc bridge", {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
       const transport = daemonUrl
         ? {
             url: daemonUrl,
@@ -204,16 +237,16 @@ export const TuiThreadCommand = cmd({
             events: undefined,
           }
         : external
-        ? {
-            url: (await client.call("server", network)).url,
-            fetch: undefined,
-            events: undefined,
-          }
-        : {
-            url: "http://opencode.internal",
-            fetch: createWorkerFetch(client),
-            events: createEventSource(client),
-          }
+          ? {
+              url: (await client.call("server", network)).url,
+              fetch: undefined,
+              events: undefined,
+            }
+          : {
+              url: "http://opencode.internal",
+              fetch: createWorkerFetch(client),
+              events: createEventSource(client),
+            }
 
       setTimeout(() => {
         client.call("checkUpgrade", { directory: cwd }).catch(() => {})
