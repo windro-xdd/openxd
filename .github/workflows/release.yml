@@ -1,0 +1,113 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. 0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: linux-x64-baseline
+            archive: tar.gz
+            baseline: true
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            archive: tar.gz
+          - os: macos-latest
+            target: darwin-arm64
+            archive: zip
+          - os: macos-latest
+            target: darwin-x64
+            archive: zip
+            x64: true
+          - os: macos-latest
+            target: darwin-x64-baseline
+            archive: zip
+            x64: true
+            baseline: true
+          - os: windows-latest
+            target: windows-x64
+            archive: zip
+          - os: windows-latest
+            target: windows-x64-baseline
+            archive: zip
+            baseline: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Clone opencode
+        uses: actions/checkout@v4
+        with:
+          repository: anomalyco/opencode
+          ref: dev
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install deps
+        run: bun install
+
+      - name: Build
+        run: bun run ./packages/opencode/script/build.ts --single ${{ matrix.baseline && '--baseline' || '' }}
+        env:
+          OPENCODE_VERSION: ${{ inputs.version }}
+
+      - name: Rename and package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd packages/opencode/dist/*/bin
+          mv opencode openxd
+          chmod +x openxd
+          if [[ "${{ matrix.archive }}" == "tar.gz" ]]; then
+            tar -czf /tmp/openxd-${{ matrix.target }}.tar.gz openxd
+          else
+            zip /tmp/openxd-${{ matrix.target }}.zip openxd
+          fi
+
+      - name: Rename and package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = Get-ChildItem -Path packages/opencode/dist/*/bin/opencode.exe -Recurse | Select-Object -First 1
+          $dir = $bin.DirectoryName
+          Rename-Item -Path $bin.FullName -NewName "openxd.exe"
+          Compress-Archive -Path "$dir/openxd.exe" -DestinationPath "$env:TEMP/openxd-${{ matrix.target }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openxd-${{ matrix.target }}
+          path: |
+            /tmp/openxd-${{ matrix.target }}.*
+            ${{ runner.temp }}/openxd-${{ matrix.target }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -lh assets/
+          gh release create "v${{ inputs.version }}" assets/* \
+            --repo ${{ github.repository }} \
+            --title "v${{ inputs.version }}" \
+            --generate-notes
