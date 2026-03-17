@@ -1,89 +1,40 @@
 ---
 name: vercel-composition-patterns
-description:
-  React composition patterns that scale. Use when refactoring components with
-  boolean prop proliferation, building flexible component libraries, or
-  designing reusable APIs. Triggers on tasks involving compound components,
-  render props, context providers, or component architecture. Includes React 19
-  API changes.
-license: MIT
-metadata:
-  author: vercel
-  version: '1.0.0'
+description: React composition patterns that scale. Use when refactoring components with boolean prop proliferation, building flexible component libraries, or designing reusable APIs. Triggers on tasks involving compound components, render props, context providers, or component architecture. Includes React 19 API changes.
 ---
 
-# React Composition Patterns
+## Purpose
 
-Composition patterns for building flexible, maintainable React components. Avoid
-boolean prop proliferation by using compound components, lifting state, and
-composing internals. These patterns make codebases easier for both humans and AI
-agents to work with as they scale.
+- Apply composition-first React architecture that scales without boolean-prop explosion.
+- Preserve reusable APIs by separating structure, state contracts, and variant assembly.
 
-## When to Apply
+## When to Use
 
-Reference these guidelines when:
+- Component has many boolean mode props (`isX`, `showY`, `renderZ`) or nested conditional UI.
+- You are designing/refactoring compound components, context providers, or shared UI primitives.
+- You need explicit component variants for different flows (thread/edit/forward/etc.).
+- React 19 migration touches `forwardRef`/`useContext` patterns.
 
-- Refactoring components with many boolean props
-- Building reusable component libraries
-- Designing flexible component APIs
-- Reviewing component architecture
-- Working with compound components or context providers
+## Constraints
 
-## Rule Categories by Priority
+- Must replace behavior flags with composition, explicit variants, or provider boundaries.
+- Must keep UI components coupled to context interface, not to state backend details.
+- Must prefer children composition over render-prop slot proliferation unless data injection is required.
+- Must preserve current behavior; refactor structure, not product semantics.
+- Must treat React 19 rules as version-gated; do not apply them to React 18 code.
 
-| Priority | Category                | Impact | Prefix          |
-| -------- | ----------------------- | ------ | --------------- |
-| 1        | Component Architecture  | HIGH   | `architecture-` |
-| 2        | State Management        | MEDIUM | `state-`        |
-| 3        | Implementation Patterns | MEDIUM | `patterns-`     |
-| 4        | React 19 APIs           | MEDIUM | `react19-`      |
+## Workflow
 
-## Quick Reference
+1. Identify anti-patterns: boolean-prop matrices, render-prop sprawl, and state trapped in leaf UI.
+2. Convert to compound API and explicit variants; move shared state/actions into provider context.
+3. Keep context contract stable (`state`, `actions`, `meta`) so multiple providers can back same UI.
+4. Apply React 19-only adjustments (`use()`/ref patterns) only when project version supports them.
+5. Validate with focused checks: fewer conditionals, clearer variant boundaries, no behavior regression.
+6. Use detailed rule docs when needed: `rules/*.md`; use full reference only for edge cases: `AGENTS.md`.
 
-### 1. Component Architecture (HIGH)
+## Output Format
 
-- `architecture-avoid-boolean-props` - Don't add boolean props to customize
-  behavior; use composition
-- `architecture-compound-components` - Structure complex components with shared
-  context
-
-### 2. State Management (MEDIUM)
-
-- `state-decouple-implementation` - Provider is the only place that knows how
-  state is managed
-- `state-context-interface` - Define generic interface with state, actions, meta
-  for dependency injection
-- `state-lift-state` - Move state into provider components for sibling access
-
-### 3. Implementation Patterns (MEDIUM)
-
-- `patterns-explicit-variants` - Create explicit variant components instead of
-  boolean modes
-- `patterns-children-over-render-props` - Use children for composition instead
-  of renderX props
-
-### 4. React 19 APIs (MEDIUM)
-
-> **⚠️ React 19+ only.** Skip this section if using React 18 or earlier.
-
-- `react19-no-forwardref` - Don't use `forwardRef`; use `use()` instead of `useContext()`
-
-## How to Use
-
-Read individual rule files for detailed explanations and code examples:
-
-```
-rules/architecture-avoid-boolean-props.md
-rules/state-context-interface.md
-```
-
-Each rule file contains:
-
-- Brief explanation of why it matters
-- Incorrect code example with explanation
-- Correct code example with explanation
-- Additional context and references
-
-## Full Compiled Document
-
-For the complete guide with all rules expanded: `AGENTS.md`
+- Scope: list which components/variants were refactored and why.
+- Changes: list concrete architecture decisions (provider split, compound API, variant extraction).
+- Verification: report anti-patterns removed and behavior checks performed.
+- References: include only consulted docs (`rules/...`, `AGENTS.md`) when relevant.

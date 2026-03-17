@@ -1,153 +1,43 @@
 ---
 name: next-best-practices
 description: Next.js best practices - file conventions, RSC boundaries, data patterns, async APIs, metadata, error handling, route handlers, image/font optimization, bundling
-user-invocable: false
 ---
 
-# Next.js Best Practices
+## Purpose
 
-Apply these rules when writing or reviewing Next.js code.
+- Apply production-safe Next.js patterns across architecture, rendering, routing, and delivery.
+- Prevent common App Router regressions (RSC misuse, waterfalls, hydration errors, bundling mistakes).
 
-## File Conventions
+## When to Use
 
-See [file-conventions.md](./file-conventions.md) for:
-- Project structure and special files
-- Route segments (dynamic, catch-all, groups)
-- Parallel and intercepting routes
-- Middleware rename in v16 (middleware → proxy)
+- Creating/refactoring/reviewing Next.js App Router code.
+- Touching file conventions, route handlers, metadata, directives, or runtime behavior.
+- Handling async APIs (`params`, `searchParams`, `cookies`, `headers`) in Next.js 15+.
+- Optimizing images/fonts/scripts/bundles or fixing hydration/suspense issues.
 
-## RSC Boundaries
+## Constraints
 
-Detect invalid React Server Component patterns.
+- Must keep guidance aligned to documented Next.js behavior; no framework-agnostic substitutions.
+- Must enforce server/client boundary correctness before micro-optimizations.
+- Must avoid duplicating deep guidance; link to topic docs instead.
+- Must preserve feature semantics while improving correctness/performance.
+- Must choose runtime intentionally (Node default; Edge only with clear benefit/compatibility).
 
-See [rsc-boundaries.md](./rsc-boundaries.md) for:
-- Async client component detection (invalid)
-- Non-serializable props detection
-- Server Action exceptions
+## Workflow
 
-## Async Patterns
+1. Classify change area: structure, boundary, data flow, routing, metadata, delivery, or runtime.
+2. Validate core invariants first: file conventions, RSC boundaries, async API usage, route-handler rules.
+3. Apply relevant topic doc(s), only for affected surfaces:
+   - `file-conventions.md`, `rsc-boundaries.md`, `async-patterns.md`, `runtime-selection.md`
+   - `directives.md`, `functions.md`, `error-handling.md`, `data-patterns.md`, `route-handlers.md`
+   - `metadata.md`, `image.md`, `font.md`, `bundling.md`, `scripts.md`
+   - `hydration-error.md`, `suspense-boundaries.md`, `parallel-routes.md`, `self-hosting.md`, `debug-tricks.md`
+4. Prefer minimal safe fix path: correct boundaries/data flow first, then optimize asset/script/bundle behavior.
+5. Verify by area touched (type/build/runtime behavior) and check for new hydration or routing regressions.
 
-Next.js 15+ async API changes.
+## Output Format
 
-See [async-patterns.md](./async-patterns.md) for:
-- Async `params` and `searchParams`
-- Async `cookies()` and `headers()`
-- Migration codemod
-
-## Runtime Selection
-
-See [runtime-selection.md](./runtime-selection.md) for:
-- Default to Node.js runtime
-- When Edge runtime is appropriate
-
-## Directives
-
-See [directives.md](./directives.md) for:
-- `'use client'`, `'use server'` (React)
-- `'use cache'` (Next.js)
-
-## Functions
-
-See [functions.md](./functions.md) for:
-- Navigation hooks: `useRouter`, `usePathname`, `useSearchParams`, `useParams`
-- Server functions: `cookies`, `headers`, `draftMode`, `after`
-- Generate functions: `generateStaticParams`, `generateMetadata`
-
-## Error Handling
-
-See [error-handling.md](./error-handling.md) for:
-- `error.tsx`, `global-error.tsx`, `not-found.tsx`
-- `redirect`, `permanentRedirect`, `notFound`
-- `forbidden`, `unauthorized` (auth errors)
-- `unstable_rethrow` for catch blocks
-
-## Data Patterns
-
-See [data-patterns.md](./data-patterns.md) for:
-- Server Components vs Server Actions vs Route Handlers
-- Avoiding data waterfalls (`Promise.all`, Suspense, preload)
-- Client component data fetching
-
-## Route Handlers
-
-See [route-handlers.md](./route-handlers.md) for:
-- `route.ts` basics
-- GET handler conflicts with `page.tsx`
-- Environment behavior (no React DOM)
-- When to use vs Server Actions
-
-## Metadata & OG Images
-
-See [metadata.md](./metadata.md) for:
-- Static and dynamic metadata
-- `generateMetadata` function
-- OG image generation with `next/og`
-- File-based metadata conventions
-
-## Image Optimization
-
-See [image.md](./image.md) for:
-- Always use `next/image` over `<img>`
-- Remote images configuration
-- Responsive `sizes` attribute
-- Blur placeholders
-- Priority loading for LCP
-
-## Font Optimization
-
-See [font.md](./font.md) for:
-- `next/font` setup
-- Google Fonts, local fonts
-- Tailwind CSS integration
-- Preloading subsets
-
-## Bundling
-
-See [bundling.md](./bundling.md) for:
-- Server-incompatible packages
-- CSS imports (not link tags)
-- Polyfills (already included)
-- ESM/CommonJS issues
-- Bundle analysis
-
-## Scripts
-
-See [scripts.md](./scripts.md) for:
-- `next/script` vs native script tags
-- Inline scripts need `id`
-- Loading strategies
-- Google Analytics with `@next/third-parties`
-
-## Hydration Errors
-
-See [hydration-error.md](./hydration-error.md) for:
-- Common causes (browser APIs, dates, invalid HTML)
-- Debugging with error overlay
-- Fixes for each cause
-
-## Suspense Boundaries
-
-See [suspense-boundaries.md](./suspense-boundaries.md) for:
-- CSR bailout with `useSearchParams` and `usePathname`
-- Which hooks require Suspense boundaries
-
-## Parallel & Intercepting Routes
-
-See [parallel-routes.md](./parallel-routes.md) for:
-- Modal patterns with `@slot` and `(.)` interceptors
-- `default.tsx` for fallbacks
-- Closing modals correctly with `router.back()`
-
-## Self-Hosting
-
-See [self-hosting.md](./self-hosting.md) for:
-- `output: 'standalone'` for Docker
-- Cache handlers for multi-instance ISR
-- What works vs needs extra setup
-
-## Debug Tricks
-
-See [debug-tricks.md](./debug-tricks.md) for:
-- MCP endpoint for AI-assisted debugging
-- Rebuild specific routes with `--debug-build-paths`
-
+- Scope: list touched Next.js surfaces (e.g., RSC boundary, metadata, route handler).
+- Applied Rules: cite topic docs used and the concrete decisions made.
+- Verification: report checks run and regressions prevented/fixed.
+- Follow-ups: list only unresolved Next.js-specific risks.
