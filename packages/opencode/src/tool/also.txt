@@ -1,0 +1,17 @@
+Run a parallel task alongside the current conversation. The parallel task gets a FULL COPY of the current conversation context and works independently. When it completes, its results are merged back into the main session as a message.
+
+Use this when:
+- The user wants to work on something else without interrupting current work
+- The user says "also do X" or "meanwhile, do Y" or "in parallel, handle Z"
+- A secondary task can run independently while the main conversation continues
+
+The parallel session:
+- Starts with the FULL context of the current session (all messages up to this point)
+- Runs completely independently (non-blocking)
+- When complete, its final result is injected back into the main session
+- The parallel session is then deleted (cleaned up)
+
+Do NOT use for:
+- Tasks that depend on work being done in the current conversation right now
+- Simple questions (just answer them)
+- Tasks that need user interaction mid-execution

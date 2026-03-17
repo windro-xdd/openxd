@@ -1,0 +1,22 @@
+- Fetches content from a specified URL
+- Takes a URL, optional format, and optional screenshot/useBrowser flags
+- Fetches the URL content, converts to requested format (markdown by default)
+- Returns the content in the specified format
+- Use this tool when you need to read content from a KNOWN URL
+
+IMPORTANT: This is NOT a search engine. NEVER use webfetch to construct search URLs like:
+  - duckduckgo.com/?q=...
+  - google.com/search?q=...
+  - bing.com/search?q=...
+These will ALWAYS fail or get blocked. Use the "websearch" tool for ALL search queries instead.
+Only use webfetch when you already have a specific URL to read (e.g., a documentation page, a GitHub repo, an article).
+
+Smart rendering:
+  - Automatically detects JS-rendered pages (React, Next.js, Vue, etc.) and falls back to browser rendering
+  - Set useBrowser=true to force browser rendering for JS-heavy sites
+  - Set screenshot=true to capture a visual screenshot of the page alongside the content
+
+Usage notes:
+  - The URL must be a fully-formed valid URL
+  - Format options: "markdown" (default), "text", or "html"
+  - For interactive pages (clicking, filling forms), use the browser tool instead

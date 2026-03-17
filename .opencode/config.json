@@ -1,0 +1,59 @@
+{
+  "telegram": {
+    "botToken": "8337969780:AAG3GqfseS0FDHNOK2QDtNkhnglYeQVks_M",
+    "allowedUsers": []
+  },
+  "daemon": {
+    "heartbeat": {
+      "enabled": false,
+      "intervalMinutes": 30
+    }
+  },
+  "browser": {
+    "relay": {
+      "enabled": true,
+      "port": 4097
+    }
+  },
+  "mcp": {
+    "filesystem": {
+      "type": "local",
+      "enabled": true,
+      "command": ["opencode", "x", "@modelcontextprotocol/server-filesystem", "/home/wnxd", "/home/wnxd/opencode-repo"],
+      "timeout": 20000
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "enabled": true,
+      "command": ["opencode", "x", "@modelcontextprotocol/server-sequential-thinking"],
+      "timeout": 15000
+    },
+    "memory-graph": {
+      "type": "local",
+      "enabled": true,
+      "command": ["opencode", "x", "@modelcontextprotocol/server-memory"],
+      "timeout": 15000
+    },
+    "playwright": {
+      "type": "local",
+      "enabled": true,
+      "command": ["opencode", "x", "@playwright/mcp"],
+      "timeout": 30000
+    },
+    "postgres-local": {
+      "type": "local",
+      "enabled": false,
+      "command": ["opencode", "x", "@modelcontextprotocol/server-postgres"],
+      "environment": {
+        "DATABASE_URL": "postgresql://localhost:5432/postgres"
+      },
+      "timeout": 20000
+    },
+    "puppeteer": {
+      "type": "local",
+      "enabled": false,
+      "command": ["opencode", "x", "@modelcontextprotocol/server-puppeteer"],
+      "timeout": 30000
+    }
+  }
+}

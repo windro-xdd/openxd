@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 260px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #e0e0e0;
+      background: #1a1a2e;
+      margin: 0;
+    }
+    h3 {
+      margin: 0 0 12px 0;
+      font-size: 15px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status {
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      text-align: center;
+    }
+    .status.connected {
+      background: #1b3a2a;
+      color: #4CAF50;
+      border: 1px solid #2d5a3e;
+    }
+    .status.disconnected {
+      background: #3a1b1b;
+      color: #f44336;
+      border: 1px solid #5a2d2d;
+    }
+    .hint {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #666;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h3>⚡ OpenCode Browser</h3>
+  <div id="status" class="status disconnected">Checking...</div>
+  <div class="hint">Full browser control — all tabs accessible</div>
+  <script src="popup.js"></script>
+</body>
+</html>

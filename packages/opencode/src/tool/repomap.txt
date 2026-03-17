@@ -1,0 +1,13 @@
+Generate a compact structural map of the codebase showing top-level symbols per file.
+
+Returns a hierarchical summary like:
+  src/session/index.ts:
+    export Session.get
+    export Session.create
+    function fromRow
+  src/tool/edit.ts:
+    export default EditTool
+
+Use this to understand the codebase structure at a glance — what's exported, what functions exist, without reading every file. Filter by path prefix to focus on a subsystem (e.g. "src/session/" shows only session-related files).
+
+Respects .gitignore. Caches results between calls, invalidated by file modification time.

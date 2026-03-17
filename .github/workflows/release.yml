@@ -1,18 +1,44 @@
 name: release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version tag (e.g. 0.2.0)"
-        required: true
-        type: string
+  push:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          # Get version from package.json
+          version=$(jq -r '.version' packages/opencode/package.json)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+          # Check if this version tag already exists
+          if gh release view "v$version" --repo ${{ github.repository }} &>/dev/null; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Release v$version already exists, skipping"
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "New version v$version detected, building release"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -48,11 +74,7 @@ jobs:
             baseline: true
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Clone opencode
-        uses: actions/checkout@v4
-        with:
-          repository: anomalyco/opencode
-          ref: dev
+      - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
 
@@ -62,7 +84,7 @@ jobs:
       - name: Build
         run: bun run ./packages/opencode/script/build.ts --single ${{ matrix.baseline && '--baseline' || '' }}
         env:
-          OPENCODE_VERSION: ${{ inputs.version }}
+          OPENCODE_VERSION: ${{ needs.check.outputs.version }}
 
       - name: Rename and package (unix)
         if: runner.os != 'Windows'
@@ -94,7 +116,7 @@ jobs:
             ${{ runner.temp }}/openxd-${{ matrix.target }}.*
 
   release:
-    needs: build
+    needs: [check, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -107,7 +129,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -lh assets/
-          gh release create "v${{ inputs.version }}" assets/* \
+          gh release create "v${{ needs.check.outputs.version }}" assets/* \
             --repo ${{ github.repository }} \
-            --title "v${{ inputs.version }}" \
+            --title "v${{ needs.check.outputs.version }}" \
             --generate-notes
