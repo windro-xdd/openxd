@@ -84,7 +84,7 @@ jobs:
         run: bun install
 
       - name: Build + upload
-        run: bun run ./packages/opencode/script/build.ts ${{ matrix.baseline && '--baseline' || '' }}
+        run: bun run ./packages/opencode/script/build.ts --single ${{ matrix.baseline && '--baseline' || '' }}
         env:
           OPENCODE_RELEASE: "1"
           OPENCODE_VERSION: ${{ needs.check.outputs.version }}
