@@ -2,7 +2,7 @@
 // Inspired by claude-mem but without external dependencies (no Chroma, no Python)
 // Uses SQLite FTS5 for efficient full-text search
 
-import { Database, eq, desc, and, sql, like, or, inArray } from "../storage/db"
+import { Database, eq, desc, and, sql, like, or, inArray, asc } from "../storage/db"
 import { ObservationTable } from "./observation.sql"
 import { Log } from "../util/log"
 import { ulid } from "ulid"
@@ -31,8 +31,6 @@ export namespace Observation {
     | "browser" // Browser actions
     | "memory" // Memory tool
     | "error" // Tool errors
-    | "decision" // User decisions/confirmations
-    | "finding" // Bug bounty findings, discoveries
     | "other"
 
   function classify(tool: string, output: string): ObservationType {
@@ -121,7 +119,7 @@ export namespace Observation {
     const now = Date.now()
 
     try {
-      Database.use((db) => {
+      Database.transaction((db) => {
         db.insert(ObservationTable)
           .values({
             id,
@@ -136,10 +134,7 @@ export namespace Observation {
             time_updated: now,
           })
           .run()
-      })
 
-      // Also insert into FTS index
-      Database.use((db) => {
         db.run(
           sql`INSERT INTO observation_fts (id, summary, content, tags) VALUES (${id}, ${summary}, ${content}, ${tags})`,
         )
@@ -225,37 +220,94 @@ export namespace Observation {
     const before = opts.before ?? 5
     const after = opts.after ?? 5
 
-    let pivot: number | undefined
-
-    if (opts.observationId) {
-      const obsId = opts.observationId
-      const obs = Database.use((db) =>
-        db
-          .select({ created: ObservationTable.time_created })
+    if (!opts.observationId) {
+      const results = Database.use((db) => {
+        return db
+          .select()
           .from(ObservationTable)
-          .where(eq(ObservationTable.id, obsId))
-          .get(),
-      )
-      pivot = obs?.created ?? undefined
+          .where(
+            and(
+              eq(ObservationTable.project_id, opts.projectId),
+              opts.sessionId ? eq(ObservationTable.session_id, opts.sessionId) : undefined,
+            ),
+          )
+          .orderBy(desc(ObservationTable.time_created))
+          .limit(before + after + 1)
+          .all()
+      })
+
+      return results.map((r) => ({
+        id: r.id,
+        projectId: r.project_id,
+        sessionId: r.session_id,
+        tool: r.tool,
+        type: r.type,
+        summary: r.summary,
+        content: r.content ?? undefined,
+        tags: r.tags ?? undefined,
+        created: r.time_created!,
+      }))
     }
 
-    const results = Database.use((db) => {
-      let query = db
+    const pivot = Database.use((db) =>
+      db
+        .select({ id: ObservationTable.id, created: ObservationTable.time_created })
+        .from(ObservationTable)
+        .where(
+          and(
+            eq(ObservationTable.id, opts.observationId!),
+            eq(ObservationTable.project_id, opts.projectId),
+            opts.sessionId ? eq(ObservationTable.session_id, opts.sessionId) : undefined,
+          ),
+        )
+        .get(),
+    )
+    if (!pivot) return []
+
+    const older = Database.use((db) => {
+      return db
         .select()
         .from(ObservationTable)
         .where(
           and(
             eq(ObservationTable.project_id, opts.projectId),
             opts.sessionId ? eq(ObservationTable.session_id, opts.sessionId) : undefined,
+            or(
+              sql`${ObservationTable.time_created} < ${pivot.created!}`,
+              and(sql`${ObservationTable.time_created} = ${pivot.created!}`, sql`${ObservationTable.id} < ${pivot.id}`),
+            ),
           ),
         )
-        .orderBy(desc(ObservationTable.time_created))
-        .limit(before + after + 1)
-
-      return query.all()
+        .orderBy(desc(ObservationTable.time_created), desc(ObservationTable.id))
+        .limit(before)
+        .all()
     })
 
-    return results.map((r) => ({
+    const newer = Database.use((db) => {
+      return db
+        .select()
+        .from(ObservationTable)
+        .where(
+          and(
+            eq(ObservationTable.project_id, opts.projectId),
+            opts.sessionId ? eq(ObservationTable.session_id, opts.sessionId) : undefined,
+            or(
+              sql`${ObservationTable.time_created} > ${pivot.created!}`,
+              and(sql`${ObservationTable.time_created} = ${pivot.created!}`, sql`${ObservationTable.id} > ${pivot.id}`),
+            ),
+          ),
+        )
+        .orderBy(asc(ObservationTable.time_created), asc(ObservationTable.id))
+        .limit(after)
+        .all()
+    })
+
+    const pivotRow = Database.use((db) => {
+      return db.select().from(ObservationTable).where(eq(ObservationTable.id, pivot.id)).get()
+    })
+    const rows = [...older.reverse(), ...(pivotRow ? [pivotRow] : []), ...newer]
+
+    return rows.map((r) => ({
       id: r.id,
       projectId: r.project_id,
       sessionId: r.session_id,

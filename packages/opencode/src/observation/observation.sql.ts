@@ -17,7 +17,7 @@ export const ObservationTable = sqliteTable(
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     // Tool that generated this observation
     tool: text().notNull(),
-    // Type classification for filtering: file_edit, file_read, bash, search, browser, memory, error, decision
+    // Type classification for filtering: file_edit, file_read, bash, search, browser, memory, error, other
     type: text().notNull(),
     // Compressed summary of what happened (~50-100 tokens)
     summary: text().notNull(),

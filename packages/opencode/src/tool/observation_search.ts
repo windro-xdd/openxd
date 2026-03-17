@@ -4,10 +4,10 @@ import { Observation } from "../observation/observation"
 import { Instance } from "../project/instance"
 
 export const ObservationSearchTool = Tool.define("observation_search", {
-  description: `Search past tool executions and findings from across all sessions.
+  description: `Search past tool executions from across all sessions.
   
 Useful for:
-- Recalling previous bug bounty findings ("What did I find on Anduril last week?")
+- Recalling previous security analysis ("What did I find on Anduril last week?")
 - Finding similar code patterns ("Where did I edit this file before?")
 - Tracking progress on ongoing tasks ("What was the status on X?")
 - Cross-session context ("We already analyzed this in session Y")
@@ -20,11 +20,11 @@ Useful for:
 **Search tips:**
 - Use keywords from your goal, not exact phrases
 - "hackerone findings critical" better than "what did I find"
-- Filter by type to narrow: type:finding, type:file_edit, type:bash, type:browser`,
+- Filter by type to narrow: type:file_edit, type:bash, type:browser`,
   parameters: z.object({
     query: z.string().describe("Search query (e.g. 'Anduril CORS findings', 'DoorDash API endpoints')"),
     type: z
-      .enum(["file_edit", "file_read", "bash", "search", "browser", "memory", "error", "decision", "finding", "other"])
+      .enum(["file_edit", "file_read", "bash", "search", "browser", "memory", "error", "other"])
       .optional()
       .describe("Filter by observation type"),
     limit: z.number().int().min(1).max(50).optional().describe("Max results to return (default: 10)"),
