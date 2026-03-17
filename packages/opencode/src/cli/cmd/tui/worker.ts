@@ -66,28 +66,36 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
   })
 
   ;(async () => {
+    const min = 250
+    const max = 5_000
+    let backoff = min
+
     while (!signal.aborted) {
-      const events = await Promise.resolve(
-        sdk.event.subscribe(
+      let seen = false
+      try {
+        const events = await sdk.event.subscribe(
           {},
           {
             signal,
           },
-        ),
-      ).catch(() => undefined)
+        )
 
-      if (!events) {
-        await sleep(250)
-        continue
+        for await (const event of events.stream) {
+          Rpc.emit("event", event as Event)
+          seen = true
+          backoff = min
+        }
+      } catch (error) {
+        if (!signal.aborted) {
+          Log.Default.error("event stream cycle error", {
+            error: error instanceof Error ? error.message : error,
+          })
+        }
       }
 
-      for await (const event of events.stream) {
-        Rpc.emit("event", event as Event)
-      }
-
-      if (!signal.aborted) {
-        await sleep(250)
-      }
+      if (signal.aborted) return
+      if (!seen) backoff = Math.min(backoff * 2, max)
+      await sleep(backoff)
     }
   })().catch((error) => {
     Log.Default.error("event stream error", {
