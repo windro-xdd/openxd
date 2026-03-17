@@ -22,6 +22,16 @@ describe("mode detector", () => {
     expect(result).toEqual({ mode: "search", cleanText: "how does auth work" })
   })
 
+  test("detects slash search at start", () => {
+    const result = detectMode("/search how does auth work")
+    expect(result).toEqual({ mode: "search", cleanText: "how does auth work" })
+  })
+
+  test("detects spaced slash command prefix", () => {
+    const result = detectMode("/ plan implement retry strategy")
+    expect(result).toEqual({ mode: "plan", cleanText: "implement retry strategy" })
+  })
+
   test("does not detect search mid-sentence", () => {
     const result = detectMode("can you search for this")
     expect(result).toBeUndefined()
@@ -40,6 +50,11 @@ describe("mode detector", () => {
   test("does not detect analyze mid-sentence", () => {
     const result = detectMode("can you analyze this code")
     expect(result).toBeUndefined()
+  })
+
+  test("detects slash analyze at start", () => {
+    const result = detectMode("/analyze the performance bottlenecks")
+    expect(result).toEqual({ mode: "analyze", cleanText: "the performance bottlenecks" })
   })
 
   test("detects plan at start", () => {
@@ -70,6 +85,16 @@ describe("mode detector", () => {
   test("trims whitespace", () => {
     const result = detectMode("  ultrawork  fix stuff  ")
     expect(result).toEqual({ mode: "ultrawork", cleanText: "fix stuff" })
+  })
+
+  test("removes repeated mode aliases from cleanText", () => {
+    const result = detectMode("plan plan planning implement planning now")
+    expect(result).toEqual({ mode: "plan", cleanText: "implement now" })
+  })
+
+  test("removes repeated slash aliases from cleanText", () => {
+    const result = detectMode("/build ship /build gsd build")
+    expect(result).toEqual({ mode: "build", cleanText: "ship" })
   })
 
   test("ultrawork takes priority over other keywords", () => {
