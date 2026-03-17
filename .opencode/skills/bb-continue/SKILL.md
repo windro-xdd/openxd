@@ -3,24 +3,33 @@ name: bb-continue
 description: "Resume a bug bounty hunt from where you left off. Usage: /bb-continue <program-name>"
 ---
 
-# Bug Bounty Hunter — Resume
+## Purpose
 
-Pick up an existing hunt without redoing recon or scope.
+- Resume a specific bug bounty program efficiently from existing artifacts, without repeating completed work.
 
-## Steps
+## When to Use
 
-1. Read `~/bbh/<program-name>/scope.md` — already has the full scope
-2. Read `~/bbh/<program-name>/notes.md` — has progress, hypotheses, dead ends
-3. Read findings in `~/bbh/<program-name>/findings/` — what's already found
-4. Read recon in `~/bbh/<program-name>/recon/SUMMARY.md` if it exists
+- User runs `/bb-continue <program-name>` to continue an existing hunt.
 
-## Then
+## Constraints
 
-- Figure out where you left off from notes.md
-- Identify what phases are done vs remaining
-- Continue from the next unfinished step
-- Do NOT redo recon or rewrite scope
+- Must require `~/bbh/<program-name>/` to exist.
+- Must read existing context before any new testing: `scope.md`, `notes.md`, `findings/`, `recon/` summary files.
+- Must preserve prior scope and policy assumptions unless explicitly updated by program changes.
+- Must not rerun baseline recon unless evidence is stale or missing.
 
-## If workspace doesn't exist
+## Workflow
 
-Tell the user: "No workspace found for `<program-name>`. Run `/bb-start <program-name>` to start fresh."
+1. Verify workspace presence; if missing, return startup instruction for `/bb-start`.
+2. Load hunt state from `scope.md`, `notes.md`, `findings/*`, and key recon summaries.
+3. Determine completed vs pending phases and extract unresolved hypotheses.
+4. Build a short continuation plan (next 3 actions) tied to highest-impact pending surface.
+5. Continue execution and append progress updates to `notes.md` with evidence paths.
+
+## Output Format
+
+- `State`: workspace status and files read.
+- `Progress`: completed phases, open hypotheses, and prior findings snapshot.
+- `Next 3 Actions`: concrete tasks with target asset/endpoint.
+- `Resume Point`: exact step being continued and why.
+- If missing workspace: `No workspace found for <program-name>. Run /bb-start <program-name> to start fresh.`
