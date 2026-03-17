@@ -149,16 +149,14 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 }
 for (const item of targets) {
-  const name = [
-    BINARY_NAME,
-    // changing to win32 flags npm for some reason
+  const parts = [
     item.os === "win32" ? "windows" : item.os,
     item.arch,
     item.avx2 === false ? "baseline" : undefined,
     item.abi === undefined ? undefined : item.abi,
-  ]
-    .filter(Boolean)
-    .join("-")
+  ].filter(Boolean)
+  const name = [BINARY_NAME, ...parts].join("-")
+  const bunTarget = ["bun", ...parts].join("-")
   console.log(`building ${name}`)
   await $`mkdir -p dist/${name}/bin`
 
@@ -181,7 +179,7 @@ for (const item of targets) {
       autoloadDotenv: false,
       autoloadTsconfig: true,
       autoloadPackageJson: true,
-      target: name.replace(pkg.name, "bun") as any,
+      target: bunTarget as any,
       outfile: `dist/${name}/bin/${BINARY_NAME}`,
       execArgv: [`--user-agent=openxd/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
