@@ -15,33 +15,6 @@ describe("installation", () => {
         headers: { "content-type": "application/json" },
       })) as unknown as typeof fetch
 
-    expect(await Installation.latest("unknown")).toBe("1.2.3")
-  })
-
-  test("reads scoop manifest versions", async () => {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ version: "2.3.4" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })) as unknown as typeof fetch
-
-    expect(await Installation.latest("scoop")).toBe("2.3.4")
-  })
-
-  test("reads chocolatey feed versions", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          d: {
-            results: [{ Version: "3.4.5" }],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )) as unknown as typeof fetch
-
-    expect(await Installation.latest("choco")).toBe("3.4.5")
+    expect(await Installation.latest()).toBe("1.2.3")
   })
 })
