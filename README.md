@@ -5,13 +5,13 @@ AI-powered coding agent that lives in your terminal.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/windro-xdd/openxd/main/install | bash
+curl -fsSL windro-xdd.github.io/openxd/install | bash
 ```
 
 ### Specific version
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/windro-xdd/openxd/main/install | bash -s -- --version 1.0.0
+curl -fsSL windro-xdd.github.io/openxd/install | bash -s -- --version 1.0.0
 ```
 
 ### From local binary

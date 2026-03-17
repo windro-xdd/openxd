@@ -21,8 +21,8 @@ Options:
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
-    curl -fsSL https://raw.githubusercontent.com/windro-xdd/openxd/main/install | bash
-    curl -fsSL https://raw.githubusercontent.com/windro-xdd/openxd/main/install | bash -s -- --version 1.0.0
+    curl -fsSL windro-xdd.github.io/openxd/install | bash
+    curl -fsSL windro-xdd.github.io/openxd/install | bash -s -- --version 1.0.0
     ./install --binary /path/to/openxd
 EOF
 }
