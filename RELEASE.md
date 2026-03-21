@@ -10,7 +10,7 @@ OpenXD provides pre-built binaries for all major platforms. No compilation neede
 curl -fsSL https://install.openxd.ai | bash
 ```
 
-Or download directly from: https://github.com/windrosingh/openxd/releases
+Or download directly from: https://github.com/windro-xdd/openxd/releases
 
 ### Supported Platforms
 
@@ -59,7 +59,7 @@ Create `docs/index.html`:
 
 ```html
 <script>
-  window.location = "https://raw.githubusercontent.com/windrosingh/openxd/main/install.sh"
+  window.location = "https://raw.githubusercontent.com/windro-xdd/openxd/main/install.sh"
 </script>
 ```
 
@@ -68,7 +68,7 @@ Create `docs/index.html`:
 Use a URL shortener or redirect service to point to:
 
 ```
-https://raw.githubusercontent.com/windrosingh/openxd/main/install.sh
+https://raw.githubusercontent.com/windro-xdd/openxd/main/install.sh
 ```
 
 ### Option 3: CDN (Recommended)
@@ -76,5 +76,5 @@ https://raw.githubusercontent.com/windrosingh/openxd/main/install.sh
 Host on Cloudflare/Vercel with:
 
 ```
-https://install.openxd.ai → raw.githubusercontent.com/windrosingh/openxd/main/install.sh
+https://install.openxd.ai → raw.githubusercontent.com/windro-xdd/openxd/main/install.sh
 ```

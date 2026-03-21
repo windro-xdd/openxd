@@ -4,7 +4,7 @@ set -e
 # OpenXD installer - downloads pre-built binaries
 # Usage: curl -fsSL https://install.openxd.ai | bash
 
-REPO="windrosingh/openxd"
+REPO="windro-xdd/openxd"
 INSTALL_DIR="${OPENXD_INSTALL_DIR:-$HOME/.openxd}"
 BIN_DIR="${OPENXD_BIN_DIR:-$HOME/.local/bin}"
 
@@ -71,7 +71,18 @@ fi
 
 # Create symlink
 mkdir -p "$BIN_DIR"
-ln -sf "$INSTALL_DIR/openxd" "$BIN_DIR/openxd"
+
+BIN="$INSTALL_DIR/openxd"
+if [ ! -f "$BIN" ] && [ -f "$INSTALL_DIR/opencode" ]; then
+  BIN="$INSTALL_DIR/opencode"
+fi
+
+if [ ! -f "$BIN" ]; then
+  echo "Installed archive did not contain expected binary (openxd/opencode)"
+  exit 1
+fi
+
+ln -sf "$BIN" "$BIN_DIR/openxd"
 
 # Check if bin dir is in PATH
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then

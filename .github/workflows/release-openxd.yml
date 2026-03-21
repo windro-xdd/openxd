@@ -27,10 +27,14 @@ jobs:
       - name: Build all OpenXD binaries
         run: |
           cd packages/opencode
-          bun run script/build.ts
+          export OPENCODE_VERSION="${GITHUB_REF_NAME#v}"
+          bun run script/build.ts --skip-install
         env:
-          OPENCODE_VERSION: ${{ github.ref_name }}
-          OPENCODE_RELEASE: true
+          OPENCODE_RELEASE: ""
+
+      - name: Normalize version
+        run: |
+          echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
       - name: Package binaries
         run: |
@@ -38,12 +42,12 @@ jobs:
 
           for dir in opencode-*; do
             if [ -d "$dir" ]; then
-              base=$(echo "$dir" | sed 's/^opencode/openxd/')
+              base=$(echo "$dir" | sed "s/^opencode/openxd/" | sed "s/-${VER}$//")
               
               if [[ "$dir" == *"windows"* ]]; then
-                (cd "$dir" && zip -r "../${base}.zip" .)
+                (cd "$dir/bin" && zip -r "../../${base}.zip" .)
               else
-                tar -czf "${base}.tar.gz" -C "$dir" .
+                tar -czf "${base}.tar.gz" -C "$dir/bin" .
               fi
             fi
           done
