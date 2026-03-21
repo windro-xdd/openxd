@@ -1,0 +1,61 @@
+name: Release OpenXD
+run-name: "Release OpenXD ${{ github.ref_name }}"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build all OpenXD binaries
+        run: |
+          cd packages/opencode
+          bun run script/build.ts
+        env:
+          OPENCODE_VERSION: ${{ github.ref_name }}
+          OPENCODE_RELEASE: true
+
+      - name: Package binaries
+        run: |
+          cd packages/opencode/dist
+
+          for dir in opencode-*; do
+            if [ -d "$dir" ]; then
+              base=$(echo "$dir" | sed 's/^opencode/openxd/')
+              
+              if [[ "$dir" == *"windows"* ]]; then
+                (cd "$dir" && zip -r "../${base}.zip" .)
+              else
+                tar -czf "${base}.tar.gz" -C "$dir" .
+              fi
+            fi
+          done
+
+          ls -lh openxd-*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: packages/opencode/dist/openxd-*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
