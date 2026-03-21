@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenXD - The Open Source AI Coding Agent</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #fff;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .container {
+        max-width: 800px;
+        text-align: center;
+      }
+      h1 {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .tagline {
+        font-size: 1.5rem;
+        margin-bottom: 3rem;
+        opacity: 0.9;
+      }
+      .install-box {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      .install-command {
+        background: #1a1a2e;
+        color: #0ff;
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+        font-family: "Courier New", monospace;
+        font-size: 1.1rem;
+        margin: 1rem 0;
+        display: inline-block;
+        cursor: pointer;
+        user-select: all;
+        border: 1px solid #0ff;
+      }
+      .install-command:hover {
+        background: #252543;
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin: 2rem 0;
+      }
+      .feature {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        padding: 1.5rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      .feature h3 {
+        margin-bottom: 0.5rem;
+        font-size: 1.2rem;
+      }
+      .links {
+        margin-top: 2rem;
+      }
+      .links a {
+        color: #fff;
+        text-decoration: none;
+        margin: 0 1rem;
+        font-size: 1.1rem;
+        border-bottom: 2px solid transparent;
+        transition: border-color 0.3s;
+      }
+      .links a:hover {
+        border-bottom-color: #fff;
+      }
+      @media (max-width: 768px) {
+        h1 {
+          font-size: 2.5rem;
+        }
+        .tagline {
+          font-size: 1.2rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>OpenXD</h1>
+      <p class="tagline">The Open Source AI Coding Agent</p>
+
+      <div class="install-box">
+        <h2>Quick Install</h2>
+        <div class="install-command" onclick="copyToClipboard(this)">
+          curl -fsSL https://windro-xdd.github.io/openxd/install.sh | bash
+        </div>
+        <p style="margin-top: 1rem; opacity: 0.8">Click to copy • Works on macOS, Linux, and WSL</p>
+      </div>
+
+      <div class="features">
+        <div class="feature">
+          <h3>🤖 AI-Powered</h3>
+          <p>Multiple model support including Claude, GPT, and more</p>
+        </div>
+        <div class="feature">
+          <h3>🔧 Full Control</h3>
+          <p>Complete access to your codebase with powerful tools</p>
+        </div>
+        <div class="feature">
+          <h3>🌐 Browser Support</h3>
+          <p>Native browser automation built-in</p>
+        </div>
+        <div class="feature">
+          <h3>💾 Memory System</h3>
+          <p>Persistent context across sessions</p>
+        </div>
+      </div>
+
+      <div class="links">
+        <a href="https://github.com/windro-xdd/openxd" target="_blank">GitHub</a>
+        <a href="https://github.com/windro-xdd/openxd#readme" target="_blank">Documentation</a>
+        <a href="https://github.com/windro-xdd/openxd/issues" target="_blank">Issues</a>
+      </div>
+    </div>
+
+    <script>
+      function copyToClipboard(element) {
+        const text = element.textContent.trim()
+        navigator.clipboard.writeText(text).then(() => {
+          const original = element.textContent
+          element.textContent = "Copied!"
+          setTimeout(() => {
+            element.textContent = original
+          }, 2000)
+        })
+      }
+    </script>
+  </body>
+</html>
