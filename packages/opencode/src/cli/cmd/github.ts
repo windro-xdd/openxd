@@ -419,7 +419,7 @@ export const GithubRunCommand = cmd({
 
         const runChat = (message: string, files: PromptFile[] = []) =>
           chat({
-            sessionID: session.id,
+            sessionID: session!.id,
             message,
             files,
             variant,

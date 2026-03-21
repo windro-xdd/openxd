@@ -18,7 +18,10 @@ export namespace BrowserCDP {
   let messageId = 0
   let sessionId: string | null = null
   let activeTargetId: string | null = null
-  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+  const pending = new Map<
+    number,
+    { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+  >()
   let selectorMap: Map<number, { backendNodeId: number; tag: string; label: string | null }> = new Map()
   let browserProcess: ChildProcess | null = null
   let cdpPort = 9222
@@ -95,7 +98,7 @@ export namespace BrowserCDP {
           return
         }
       } catch {}
-      await new Promise(r => setTimeout(r, 300))
+      await new Promise((r) => setTimeout(r, 300))
     }
     throw new Error(`Browser launched but CDP not ready after ${maxWait}ms`)
   }
@@ -111,7 +114,7 @@ export namespace BrowserCDP {
       const res = await fetch(`http://127.0.0.1:${cdpPort}/json/version`)
       if (res.ok) {
         log.info("Found existing browser with CDP")
-        const info = await res.json() as any
+        const info = (await res.json()) as any
         await connect(info.webSocketDebuggerUrl)
         return
       }
@@ -121,7 +124,7 @@ export namespace BrowserCDP {
     try {
       await launchBrowser()
       const res = await fetch(`http://127.0.0.1:${cdpPort}/json/version`)
-      const info = await res.json() as any
+      const info = (await res.json()) as any
       await connect(info.webSocketDebuggerUrl)
     } catch (err: any) {
       log.warn("Failed to start browser", { error: err.message })
@@ -140,7 +143,7 @@ export namespace BrowserCDP {
     // Reconnect CDP
     try {
       const res = await fetch(`http://127.0.0.1:${cdpPort}/json/version`)
-      const info = await res.json() as any
+      const info = (await res.json()) as any
       await connect(info.webSocketDebuggerUrl)
     } catch (err: any) {
       throw new Error(`Cannot connect to browser CDP: ${err.message}`)
@@ -209,7 +212,9 @@ export namespace BrowserCDP {
     if (targetId && targetId !== activeTargetId) {
       // Switch to a different target
       if (sessionId) {
-        try { await send("Target.detachFromTarget", { sessionId }) } catch {}
+        try {
+          await send("Target.detachFromTarget", { sessionId })
+        } catch {}
       }
       activeTargetId = targetId
       sessionId = null
@@ -221,9 +226,7 @@ export namespace BrowserCDP {
     const pages = targetInfos.filter((t: any) => t.type === "page" && !t.url.startsWith("devtools://"))
     if (pages.length === 0) throw new Error("No browser tabs found")
 
-    const target = activeTargetId
-      ? pages.find((p: any) => p.targetId === activeTargetId) || pages[0]
-      : pages[0]
+    const target = activeTargetId ? pages.find((p: any) => p.targetId === activeTargetId) || pages[0] : pages[0]
 
     activeTargetId = target.targetId
 
@@ -231,13 +234,13 @@ export namespace BrowserCDP {
     sessionId = result.sessionId
 
     await Promise.all([
-      send("Page.enable", {}, sessionId),
-      send("DOM.enable", {}, sessionId),
-      send("Runtime.enable", {}, sessionId),
-      send("Accessibility.enable", {}, sessionId),
+      send("Page.enable", {}, sessionId ?? undefined),
+      send("DOM.enable", {}, sessionId ?? undefined),
+      send("Runtime.enable", {}, sessionId ?? undefined),
+      send("Accessibility.enable", {}, sessionId ?? undefined),
     ])
 
-    return sessionId
+    return sessionId!
   }
 
   // ==================== PUBLIC API ====================
@@ -260,7 +263,9 @@ export namespace BrowserCDP {
     const { targetId } = await send("Target.createTarget", { url: url || "about:blank" })
     // Switch to new tab
     if (sessionId) {
-      try { await send("Target.detachFromTarget", { sessionId }) } catch {}
+      try {
+        await send("Target.detachFromTarget", { sessionId })
+      } catch {}
     }
     activeTargetId = targetId
     sessionId = null
@@ -282,7 +287,9 @@ export namespace BrowserCDP {
     await ensureBrowser()
     await send("Target.activateTarget", { targetId })
     if (sessionId) {
-      try { await send("Target.detachFromTarget", { sessionId }) } catch {}
+      try {
+        await send("Target.detachFromTarget", { sessionId })
+      } catch {}
     }
     activeTargetId = targetId
     sessionId = null
@@ -301,24 +308,34 @@ export namespace BrowserCDP {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
       try {
-        const result = await send("Runtime.evaluate", {
-          expression: "document.readyState",
-          returnByValue: true,
-        }, sid)
+        const result = await send(
+          "Runtime.evaluate",
+          {
+            expression: "document.readyState",
+            returnByValue: true,
+          },
+          sid,
+        )
         if (result?.result?.value === "complete") {
-          await new Promise(r => setTimeout(r, 500))
+          await new Promise((r) => setTimeout(r, 500))
           return
         }
       } catch {}
-      await new Promise(r => setTimeout(r, 500))
+      await new Promise((r) => setTimeout(r, 500))
     }
   }
 
-  export async function snapshot(targetId?: string): Promise<{ title: string; url: string; tree: string; refCount: number }> {
+  export async function snapshot(
+    targetId?: string,
+  ): Promise<{ title: string; url: string; tree: string; refCount: number }> {
     await ensureBrowser()
     const sid = await ensureSession(targetId)
 
-    const urlResult = await send("Runtime.evaluate", { expression: "document.title + '\\n' + location.href", returnByValue: true }, sid)
+    const urlResult = await send(
+      "Runtime.evaluate",
+      { expression: "document.title + '\\n' + location.href", returnByValue: true },
+      sid,
+    )
     const [title, url] = (urlResult?.result?.value || "\n").split("\n")
 
     const { nodes } = await send("Accessibility.getFullAXTree", {}, sid)
@@ -329,24 +346,68 @@ export namespace BrowserCDP {
     const nodeMap = new Map<string, any>()
     for (const node of nodes) nodeMap.set(node.nodeId, node)
 
-    function getName(n: any): string { return n.name?.value || "" }
-    function getRole(n: any): string { return n.role?.value || "none" }
+    function getName(n: any): string {
+      return n.name?.value || ""
+    }
+    function getRole(n: any): string {
+      return n.role?.value || "none"
+    }
     function getProp(n: any, name: string): string | null {
       return (n.properties || []).find((p: any) => p.name === name)?.value?.value ?? null
     }
 
     const interactive = new Set([
-      "button", "link", "textbox", "searchbox", "combobox", "checkbox",
-      "radio", "switch", "slider", "spinbutton", "tab", "menuitem",
-      "menuitemcheckbox", "menuitemradio", "option", "treeitem",
+      "button",
+      "link",
+      "textbox",
+      "searchbox",
+      "combobox",
+      "checkbox",
+      "radio",
+      "switch",
+      "slider",
+      "spinbutton",
+      "tab",
+      "menuitem",
+      "menuitemcheckbox",
+      "menuitemradio",
+      "option",
+      "treeitem",
     ])
 
     const structural = new Set([
-      "heading", "banner", "navigation", "main", "contentinfo", "complementary",
-      "form", "region", "article", "list", "listitem", "table", "row", "cell",
-      "columnheader", "rowheader", "dialog", "alertdialog", "alert", "status",
-      "tooltip", "tree", "treegrid", "menu", "menubar", "toolbar", "tablist",
-      "tabpanel", "group", "separator", "img", "figure",
+      "heading",
+      "banner",
+      "navigation",
+      "main",
+      "contentinfo",
+      "complementary",
+      "form",
+      "region",
+      "article",
+      "list",
+      "listitem",
+      "table",
+      "row",
+      "cell",
+      "columnheader",
+      "rowheader",
+      "dialog",
+      "alertdialog",
+      "alert",
+      "status",
+      "tooltip",
+      "tree",
+      "treegrid",
+      "menu",
+      "menubar",
+      "toolbar",
+      "tablist",
+      "tabpanel",
+      "group",
+      "separator",
+      "img",
+      "figure",
     ])
 
     function walk(nodeId: string, depth: number) {
@@ -358,12 +419,12 @@ export namespace BrowserCDP {
       const name = getName(node)
 
       if (node.ignored && role !== "none") {
-        for (const c of (node.childIds || [])) walk(c, depth)
+        for (const c of node.childIds || []) walk(c, depth)
         return
       }
 
       if (["none", "generic", "InlineTextBox", "LineBreak"].includes(role) && !name) {
-        for (const c of (node.childIds || [])) walk(c, depth)
+        for (const c of node.childIds || []) walk(c, depth)
         return
       }
 
@@ -399,7 +460,7 @@ export namespace BrowserCDP {
         lines.push(`${indent}${name.trim().slice(0, 200)}`)
       }
 
-      for (const c of (node.childIds || [])) walk(c, depth + 1)
+      for (const c of node.childIds || []) walk(c, depth + 1)
     }
 
     const rootId = nodes[0]?.nodeId
@@ -407,7 +468,8 @@ export namespace BrowserCDP {
 
     const maxLines = 500
     const truncated = lines.length > maxLines
-    const tree = (truncated ? lines.slice(0, maxLines) : lines).join("\n") +
+    const tree =
+      (truncated ? lines.slice(0, maxLines) : lines).join("\n") +
       (truncated ? `\n...(${lines.length - maxLines} more lines)` : "")
 
     return { title, url, tree, refCount: refCounter }
@@ -430,7 +492,7 @@ export namespace BrowserCDP {
     try {
       await send("DOM.scrollIntoViewIfNeeded", { backendNodeId: entry.backendNodeId }, sid)
     } catch {}
-    await new Promise(r => setTimeout(r, 200))
+    await new Promise((r) => setTimeout(r, 200))
 
     // Get coordinates
     const { x, y } = await resolveCenter(entry.backendNodeId, sid)
@@ -438,11 +500,15 @@ export namespace BrowserCDP {
       // Fallback: use DOM.focus + JS click
       try {
         const { object } = await send("DOM.resolveNode", { backendNodeId: entry.backendNodeId }, sid)
-        await send("Runtime.callFunctionOn", {
-          objectId: object.objectId,
-          functionDeclaration: "function() { this.click(); }",
-          returnByValue: true,
-        }, sid)
+        await send(
+          "Runtime.callFunctionOn",
+          {
+            objectId: object.objectId,
+            functionDeclaration: "function() { this.click(); }",
+            returnByValue: true,
+          },
+          sid,
+        )
         return `Clicked [${ref}] ${entry.tag} "${entry.label || ""}" (JS fallback)`
       } catch {}
     }
@@ -462,14 +528,14 @@ export namespace BrowserCDP {
       if (!entry) throw new Error(`Ref [${ref}] not found.`)
 
       await send("DOM.focus", { backendNodeId: entry.backendNodeId }, sid)
-      await new Promise(r => setTimeout(r, 100))
+      await new Promise((r) => setTimeout(r, 100))
 
       if (clear) {
         await send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", modifiers: 2 }, sid)
         await send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2 }, sid)
         await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace" }, sid)
         await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace" }, sid)
-        await new Promise(r => setTimeout(r, 50))
+        await new Promise((r) => setTimeout(r, 50))
       }
     }
 
@@ -477,9 +543,17 @@ export namespace BrowserCDP {
     await send("Input.insertText", { text }, sid)
 
     if (submit) {
-      await new Promise(r => setTimeout(r, 50))
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }, sid)
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }, sid)
+      await new Promise((r) => setTimeout(r, 50))
+      await send(
+        "Input.dispatchKeyEvent",
+        { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
+        sid,
+      )
+      await send(
+        "Input.dispatchKeyEvent",
+        { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
+        sid,
+      )
     }
 
     return `Typed "${text.slice(0, 50)}${text.length > 50 ? "..." : ""}"${ref !== null ? ` into [${ref}]` : ""}${submit ? " + submitted" : ""}`
@@ -500,11 +574,20 @@ export namespace BrowserCDP {
       for (const m of mods) await send("Input.dispatchKeyEvent", { type: "keyDown", key: m, code: keyCode(m) }, sid)
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: main, code: keyCode(main), modifiers: modVal }, sid)
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: main, code: keyCode(main), modifiers: modVal }, sid)
-      for (const m of mods.reverse()) await send("Input.dispatchKeyEvent", { type: "keyUp", key: m, code: keyCode(m) }, sid)
+      for (const m of mods.reverse())
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: m, code: keyCode(m) }, sid)
     } else {
       const vk = specialVK(key)
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: keyCode(key), ...(vk ? { windowsVirtualKeyCode: vk } : {}) }, sid)
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: keyCode(key), ...(vk ? { windowsVirtualKeyCode: vk } : {}) }, sid)
+      await send(
+        "Input.dispatchKeyEvent",
+        { type: "keyDown", key, code: keyCode(key), ...(vk ? { windowsVirtualKeyCode: vk } : {}) },
+        sid,
+      )
+      await send(
+        "Input.dispatchKeyEvent",
+        { type: "keyUp", key, code: keyCode(key), ...(vk ? { windowsVirtualKeyCode: vk } : {}) },
+        sid,
+      )
     }
 
     return `Pressed ${key}`
@@ -519,15 +602,27 @@ export namespace BrowserCDP {
     const vh = metrics.layoutViewport?.clientHeight ?? 720
     const deltaY = direction === "up" ? -amount : amount
 
-    await send("Input.dispatchMouseEvent", {
-      type: "mouseWheel", x: Math.round(vw / 2), y: Math.round(vh / 2), deltaX: 0, deltaY,
-    }, sid)
+    await send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseWheel",
+        x: Math.round(vw / 2),
+        y: Math.round(vh / 2),
+        deltaX: 0,
+        deltaY,
+      },
+      sid,
+    )
 
-    await new Promise(r => setTimeout(r, 300))
-    const pos = await send("Runtime.evaluate", {
-      expression: `JSON.stringify({ scrollY: Math.round(window.scrollY), scrollHeight: document.body.scrollHeight, innerHeight: window.innerHeight })`,
-      returnByValue: true,
-    }, sid)
+    await new Promise((r) => setTimeout(r, 300))
+    const pos = await send(
+      "Runtime.evaluate",
+      {
+        expression: `JSON.stringify({ scrollY: Math.round(window.scrollY), scrollHeight: document.body.scrollHeight, innerHeight: window.innerHeight })`,
+        returnByValue: true,
+      },
+      sid,
+    )
 
     return JSON.parse(pos?.result?.value || "{}")
   }
@@ -535,11 +630,15 @@ export namespace BrowserCDP {
   export async function evaluate(script: string): Promise<string> {
     await ensureBrowser()
     const sid = await ensureSession()
-    const result = await send("Runtime.evaluate", {
-      expression: script,
-      returnByValue: true,
-      awaitPromise: true,
-    }, sid)
+    const result = await send(
+      "Runtime.evaluate",
+      {
+        expression: script,
+        returnByValue: true,
+        awaitPromise: true,
+      },
+      sid,
+    )
 
     if (result?.exceptionDetails) throw new Error(result.exceptionDetails.text || "JS evaluation failed")
     const value = result?.result?.value
@@ -555,9 +654,11 @@ export namespace BrowserCDP {
     if (!entry) throw new Error(`Ref [${ref}] not found.`)
 
     const { object } = await send("DOM.resolveNode", { backendNodeId: entry.backendNodeId }, sid)
-    await send("Runtime.callFunctionOn", {
-      objectId: object.objectId,
-      functionDeclaration: `function(val) {
+    await send(
+      "Runtime.callFunctionOn",
+      {
+        objectId: object.objectId,
+        functionDeclaration: `function(val) {
         for (const opt of this.options) {
           if (opt.value === val || opt.textContent.trim().toLowerCase() === val.toLowerCase()) {
             this.value = opt.value;
@@ -567,9 +668,11 @@ export namespace BrowserCDP {
         }
         throw new Error('Option not found: ' + val);
       }`,
-      arguments: [{ value }],
-      returnByValue: true,
-    }, sid)
+        arguments: [{ value }],
+        returnByValue: true,
+      },
+      sid,
+    )
 
     return `Selected "${value}" in [${ref}]`
   }
@@ -594,11 +697,23 @@ export namespace BrowserCDP {
 
   function keyCode(key: string): string {
     const m: Record<string, string> = {
-      Enter: "Enter", Tab: "Tab", Backspace: "Backspace", Delete: "Delete",
-      Escape: "Escape", ArrowUp: "ArrowUp", ArrowDown: "ArrowDown",
-      ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight",
-      Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
-      Control: "ControlLeft", Shift: "ShiftLeft", Alt: "AltLeft", Meta: "MetaLeft",
+      Enter: "Enter",
+      Tab: "Tab",
+      Backspace: "Backspace",
+      Delete: "Delete",
+      Escape: "Escape",
+      ArrowUp: "ArrowUp",
+      ArrowDown: "ArrowDown",
+      ArrowLeft: "ArrowLeft",
+      ArrowRight: "ArrowRight",
+      Home: "Home",
+      End: "End",
+      PageUp: "PageUp",
+      PageDown: "PageDown",
+      Control: "ControlLeft",
+      Shift: "ShiftLeft",
+      Alt: "AltLeft",
+      Meta: "MetaLeft",
       " ": "Space",
     }
     return m[key] || `Key${key.toUpperCase()}`
@@ -606,15 +721,28 @@ export namespace BrowserCDP {
 
   function specialVK(key: string): number | null {
     const m: Record<string, number> = {
-      Enter: 13, Tab: 9, Backspace: 8, Delete: 46, Escape: 27,
-      ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39,
-      Home: 36, End: 35, PageUp: 33, PageDown: 34,
+      Enter: 13,
+      Tab: 9,
+      Backspace: 8,
+      Delete: 46,
+      Escape: 27,
+      ArrowUp: 38,
+      ArrowDown: 40,
+      ArrowLeft: 37,
+      ArrowRight: 39,
+      Home: 36,
+      End: 35,
+      PageUp: 33,
+      PageDown: 34,
     }
     return m[key] || null
   }
 
   export function stop(): void {
-    if (ws) { ws.close(); ws = null }
+    if (ws) {
+      ws.close()
+      ws = null
+    }
     wsReady = false
     sessionId = null
     activeTargetId = null

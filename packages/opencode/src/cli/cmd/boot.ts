@@ -61,9 +61,12 @@ export const BootCommand = cmd({
     if (alreadySetup) {
       UI.println(
         UI.Style.TEXT_WARNING_BOLD + "!",
-        UI.Style.TEXT_NORMAL + "Identity files already exist. Run " +
-        UI.Style.TEXT_INFO_BOLD + "opencode boot --reset" +
-        UI.Style.TEXT_NORMAL + " to start fresh."
+        UI.Style.TEXT_NORMAL +
+          "Identity files already exist. Run " +
+          UI.Style.TEXT_INFO_BOLD +
+          "opencode boot --reset" +
+          UI.Style.TEXT_NORMAL +
+          " to start fresh.",
       )
 
       const readline = await import("readline")
@@ -80,7 +83,9 @@ export const BootCommand = cmd({
 
     UI.empty()
     UI.println(UI.Style.TEXT_INFO_BOLD + "⚡" + UI.Style.TEXT_NORMAL + " Starting first-time setup...")
-    UI.println(UI.Style.TEXT_DIM + "  Your assistant will ask you a few questions to get to know you." + UI.Style.TEXT_NORMAL)
+    UI.println(
+      UI.Style.TEXT_DIM + "  Your assistant will ask you a few questions to get to know you." + UI.Style.TEXT_NORMAL,
+    )
     UI.empty()
 
     await bootstrap(process.cwd(), async () => {
@@ -142,9 +147,9 @@ export const BootCommand = cmd({
           if (permission.sessionID !== sessionID) continue
           // Auto-approve writes during boot
           if (permission.permission === "write" || permission.permission === "edit") {
-            await sdk.permission.reply({ requestID: permission.id, reply: "approve" })
+            await sdk.permission.reply({ requestID: permission.id, reply: "always" })
           } else {
-            await sdk.permission.reply({ requestID: permission.id, reply: "approve" })
+            await sdk.permission.reply({ requestID: permission.id, reply: "always" })
           }
         }
 
@@ -161,7 +166,15 @@ export const BootCommand = cmd({
             if (allCreated) {
               UI.empty()
               UI.println(UI.Style.TEXT_INFO_BOLD + "✨ Setup complete!" + UI.Style.TEXT_NORMAL)
-              UI.println(UI.Style.TEXT_DIM + "  Run " + UI.Style.TEXT_INFO_BOLD + "opencode" + UI.Style.TEXT_DIM + " to start chatting with your assistant." + UI.Style.TEXT_NORMAL)
+              UI.println(
+                UI.Style.TEXT_DIM +
+                  "  Run " +
+                  UI.Style.TEXT_INFO_BOLD +
+                  "opencode" +
+                  UI.Style.TEXT_DIM +
+                  " to start chatting with your assistant." +
+                  UI.Style.TEXT_NORMAL,
+              )
               UI.empty()
               rl.close()
               process.exit(0)
@@ -194,14 +207,13 @@ export const BootCommand = cmd({
 async function checkFilesCreated(dir: string): Promise<boolean> {
   const required = ["SOUL.md", "USER.md", "IDENTITY.md"]
   for (const file of required) {
-    const paths = [
-      path.join(dir, file),
-      path.join(dir, ".opencode", file),
-      path.join(Global.Path.config, file),
-    ]
+    const paths = [path.join(dir, file), path.join(dir, ".opencode", file), path.join(Global.Path.config, file)]
     let found = false
     for (const p of paths) {
-      if (await Filesystem.exists(p)) { found = true; break }
+      if (await Filesystem.exists(p)) {
+        found = true
+        break
+      }
     }
     if (!found) return false
   }

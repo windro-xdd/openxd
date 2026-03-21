@@ -28,3 +28,7 @@ opencode-dev
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+
+# Local config with secrets
+.opencode/config.json
+config.json
