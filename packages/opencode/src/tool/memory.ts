@@ -5,6 +5,7 @@ import { Tool } from "./tool"
 import { Instance } from "../project/instance"
 import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
+import { KnowledgeSync } from "../knowledge/service"
 
 const MEMORY_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md", "LESSONS.md"]
 const DAILY_PATTERN = /^memory\/\d{4}-\d{2}-\d{2}\.md$/
@@ -80,6 +81,19 @@ async function listDailyFiles(): Promise<{ date: string; path: string; size: num
   return results.sort((a, b) => b.date.localeCompare(a.date))
 }
 
+async function load(filePath: string) {
+  const doc = KnowledgeSync.get_document(path.resolve(filePath))
+  if (doc) return doc.raw
+  return fs.readFile(filePath, "utf-8").catch(() => undefined)
+}
+
+async function store(filePath: string, raw: string) {
+  const next = await KnowledgeSync.write_document({ path: filePath, raw })
+  if (next?.state === "conflict") {
+    throw new Error(`Knowledge sync conflict while writing ${filePath}`)
+  }
+}
+
 export const MemoryTool = Tool.define("memory", {
   description: `Read and write your persistent memory files.
 
@@ -132,17 +146,11 @@ Actions:
       const filePath = await findDailyFile(today())
       await fs.mkdir(path.dirname(filePath), { recursive: true })
 
-      let existing = ""
-      try {
-        existing = await fs.readFile(filePath, "utf-8")
-      } catch {
-        // First entry of the day — add header
-        existing = `# ${today()}\n`
-      }
+      const existing = (await load(filePath)) ?? `# ${today()}\n`
 
       const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })
       const newContent = existing.trimEnd() + `\n\n## ${timestamp}\n${params.content}`
-      await fs.writeFile(filePath, newContent, "utf-8")
+      await store(filePath, newContent)
       return {
         title: `Daily: ${today()}`,
         output: `Appended ${params.content.length} chars to ${filePath}`,
@@ -158,16 +166,13 @@ Actions:
       const filePath = await findMemoryFile("LESSONS.md")
       await fs.mkdir(path.dirname(filePath), { recursive: true })
 
-      let existing = ""
-      try {
-        existing = await fs.readFile(filePath, "utf-8")
-      } catch {
-        existing = `# Lessons Learned\n\nThings I got wrong and what to do instead. I review this at the start of tasks to avoid repeating mistakes.\n`
-      }
+      const existing =
+        (await load(filePath)) ??
+        `# Lessons Learned\n\nThings I got wrong and what to do instead. I review this at the start of tasks to avoid repeating mistakes.\n`
 
       const timestamp = new Date().toISOString().split("T")[0]
       const newContent = existing.trimEnd() + `\n\n### ${timestamp}\n${params.content}`
-      await fs.writeFile(filePath, newContent, "utf-8")
+      await store(filePath, newContent)
       return {
         title: "Lesson Logged",
         output: `Lesson saved to ${filePath}. I will review this in future sessions to avoid repeating this mistake.`,
@@ -196,19 +201,19 @@ Actions:
     }
 
     if (params.action === "read") {
-      try {
-        const content = await fs.readFile(filePath, "utf-8")
+      const content = await load(filePath)
+      if (typeof content === "string") {
         return {
           title: `Read ${fileName}`,
           output: content || "(empty file)",
           metadata: { path: filePath },
         }
-      } catch {
-        return {
-          title: `Read ${fileName}`,
-          output: `${fileName} does not exist yet. Use write or append to create it.`,
-          metadata: { path: filePath, exists: false },
-        }
+      }
+
+      return {
+        title: `Read ${fileName}`,
+        output: `${fileName} does not exist yet. Use write or append to create it.`,
+        metadata: { path: filePath, exists: false },
       }
     }
 
@@ -219,7 +224,7 @@ Actions:
     await fs.mkdir(path.dirname(filePath), { recursive: true })
 
     if (params.action === "write") {
-      await fs.writeFile(filePath, params.content, "utf-8")
+      await store(filePath, params.content)
       return {
         title: `Updated ${fileName}`,
         output: `Successfully wrote ${params.content.length} chars to ${filePath}`,
@@ -228,14 +233,9 @@ Actions:
     }
 
     if (params.action === "append") {
-      let existing = ""
-      try {
-        existing = await fs.readFile(filePath, "utf-8")
-      } catch {
-        // file doesn't exist
-      }
+      const existing = (await load(filePath)) ?? ""
       const newContent = existing ? existing.trimEnd() + "\n\n" + params.content : params.content
-      await fs.writeFile(filePath, newContent, "utf-8")
+      await store(filePath, newContent)
       return {
         title: `Appended to ${fileName}`,
         output: `Successfully appended ${params.content.length} chars to ${filePath}`,

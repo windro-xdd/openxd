@@ -255,8 +255,12 @@ export namespace KnowledgeSync {
     }
   }
 
-  export function search_chunks(input: { query: string; kind?: Kind; limit?: number }) {
+  export function search_chunks(input: { query: string; kind?: Kind | Kind[]; limit?: number }) {
     return KnowledgeRepo.search(input)
+  }
+
+  export function list_documents(input?: { kind?: Kind | Kind[] }) {
+    return KnowledgeRepo.documents(input)
   }
 
   export function get_document(path: string) {

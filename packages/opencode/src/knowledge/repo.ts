@@ -6,6 +6,19 @@ import type { Chunk } from "./chunk"
 import type { Kind } from "./paths"
 
 export type Document = typeof KnowledgeDocumentTable.$inferSelect
+export type SearchRow = {
+  id: string
+  document_id: string
+  path: string
+  kind: string
+  ordinal: number
+  heading: string | null
+  raw: string
+  version: number
+  start_line: number | null
+  end_line: number | null
+  score: number
+}
 
 function now() {
   return Date.now()
@@ -160,26 +173,49 @@ export namespace KnowledgeRepo {
     return get(path)
   }
 
-  export function search(input: { query: string; kind?: Kind; limit?: number }) {
+  export function documents(input?: { kind?: Kind | Kind[] }) {
+    return Database.use((db) => {
+      if (!input?.kind) return db.select().from(KnowledgeDocumentTable).all()
+      if (Array.isArray(input.kind)) {
+        if (!input.kind.length) return []
+        return db
+          .select()
+          .from(KnowledgeDocumentTable)
+          .where(sql`${KnowledgeDocumentTable.kind} in (${sql.join(
+            input.kind.map((item) => sql`${item}`),
+            sql`, `,
+          )})`)
+          .all()
+      }
+      return db.select().from(KnowledgeDocumentTable).where(eq(KnowledgeDocumentTable.kind, input.kind)).all()
+    })
+  }
+
+  export function search(input: { query: string; kind?: Kind | Kind[]; limit?: number }) {
     const limit = input.limit ?? 10
+    const kinds = Array.isArray(input.kind) ? input.kind : input.kind ? [input.kind] : []
+    const kindSql = !kinds.length
+      ? sql``
+      : sql`AND c.kind in (${sql.join(
+          kinds.map((item) => sql`${item}`),
+          sql`, `,
+        )})`
+    const kindWhere = !kinds.length
+      ? undefined
+      : kinds.length === 1
+        ? eq(KnowledgeChunkTable.kind, kinds[0])
+        : sql`${KnowledgeChunkTable.kind} in (${sql.join(
+            kinds.map((item) => sql`${item}`),
+            sql`, `,
+          )})`
     try {
       return Database.use((db) =>
-        db.all<{
-          id: string
-          document_id: string
-          path: string
-          kind: string
-          ordinal: number
-          heading: string | null
-          raw: string
-          version: number
-          score: number
-        }>(sql`
-          SELECT c.id, c.document_id, c.path, c.kind, c.ordinal, c.heading, c.raw, c.version, bm25(knowledge_chunk_fts) AS score
+        db.all<SearchRow>(sql`
+          SELECT c.id, c.document_id, c.path, c.kind, c.ordinal, c.heading, c.raw, c.version, c.start_line, c.end_line, bm25(knowledge_chunk_fts) AS score
           FROM knowledge_chunk_fts
           JOIN knowledge_chunk c ON c.rowid = knowledge_chunk_fts.rowid
           WHERE knowledge_chunk_fts MATCH ${input.query}
-          ${input.kind ? sql`AND c.kind = ${input.kind}` : sql``}
+          ${kindSql}
           ORDER BY score ASC, c.path ASC, c.ordinal ASC
           LIMIT ${limit}
         `),
@@ -191,7 +227,7 @@ export namespace KnowledgeRepo {
           .from(KnowledgeChunkTable)
           .where(
             and(
-              input.kind ? eq(KnowledgeChunkTable.kind, input.kind) : undefined,
+              kindWhere,
               like(KnowledgeChunkTable.raw, `%${input.query}%`),
             ),
           )

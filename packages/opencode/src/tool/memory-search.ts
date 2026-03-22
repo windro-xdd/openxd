@@ -1,9 +1,6 @@
 import z from "zod"
-import * as path from "path"
-import * as fs from "fs/promises"
 import { Tool } from "./tool"
-import { Instance } from "../project/instance"
-import { Global } from "../global"
+import { KnowledgeSync } from "../knowledge/service"
 
 interface SearchResult {
   file: string
@@ -18,6 +15,14 @@ interface Chunk {
   heading: string
   text: string
   lineStart: number
+}
+
+interface Row {
+  path: string
+  heading: string | null
+  raw: string
+  start_line: number | null
+  score: number
 }
 
 function tokenize(text: string): string[] {
@@ -136,55 +141,33 @@ function splitIntoChunks(content: string, filePath: string): Chunk[] {
   return chunks
 }
 
-async function collectMemoryFiles(): Promise<{ path: string; content: string }[]> {
-  const files: { path: string; content: string }[] = []
-  const seen = new Set<string>()
-
-  async function tryRead(filePath: string) {
-    const resolved = path.resolve(filePath)
-    if (seen.has(resolved)) return
-    seen.add(resolved)
-    try {
-      const content = await fs.readFile(filePath, "utf-8")
-      if (content.trim()) {
-        files.push({ path: filePath, content })
-      }
-    } catch {
-      // doesn't exist
-    }
+function resolve(row: Row, query: string, words: string[]): SearchResult {
+  const text = row.raw || ""
+  const chunk: Chunk = {
+    file: row.path,
+    heading: row.heading || "(top)",
+    text,
+    lineStart: row.start_line ?? 1,
   }
-
-  // MEMORY.md locations
-  const memoryLocations = [
-    path.join(Instance.directory, ".opencode", "MEMORY.md"),
-    path.join(Instance.directory, "MEMORY.md"),
-    path.join(Global.Path.config, "MEMORY.md"),
-  ]
-  for (const loc of memoryLocations) {
-    await tryRead(loc)
+  const score = scoreChunk(chunk, query, words)
+  const fts = Number.isFinite(row.score) ? Math.max(0, Math.round(Math.abs(row.score) * 100)) : 0
+  return {
+    file: row.path,
+    lineNumber: row.start_line ?? 1,
+    snippet: extractSnippet(text, query),
+    heading: chunk.heading,
+    score: score + fts,
   }
+}
 
-  // Daily memory files
-  const memoryDirs = [
-    path.join(Instance.directory, ".opencode", "memory"),
-    path.join(Instance.directory, "memory"),
-    path.join(Global.Path.config, "memory"),
-  ]
-
-  for (const dir of memoryDirs) {
-    try {
-      const entries = await fs.readdir(dir)
-      for (const entry of entries) {
-        if (entry.endsWith(".md")) {
-          await tryRead(path.join(dir, entry))
-        }
-      }
-    } catch {
-      // dir doesn't exist
-    }
+function compact(input: SearchResult[]) {
+  const map = new Map<string, SearchResult>()
+  for (const row of input) {
+    const key = `${row.file}:${row.lineNumber}:${row.heading}`
+    const cur = map.get(key)
+    if (!cur || row.score > cur.score) map.set(key, row)
   }
-
-  return files
+  return Array.from(map.values())
 }
 
 export const MemorySearchTool = Tool.define("memory_search", {
@@ -208,7 +191,8 @@ Returns matching snippets with file path, line number, and relevance score.`,
       }
     }
 
-    const files = await collectMemoryFiles()
+    const docs = KnowledgeSync.list_documents({ kind: ["memory", "daily"] })
+    const files = docs.filter((item) => item.raw.trim()).map((item) => ({ path: item.path, content: item.raw }))
 
     if (files.length === 0) {
       return {
@@ -218,24 +202,23 @@ Returns matching snippets with file path, line number, and relevance score.`,
       }
     }
 
-    // Split all files into chunks and score them
-    const allResults: SearchResult[] = []
+    const query = queryWords.join(" ")
+    const rows = KnowledgeSync.search_chunks({ query: query || params.query, kind: ["memory", "daily"], limit: maxResults * 8 }) as Row[]
 
-    for (const file of files) {
-      const chunks = splitIntoChunks(file.content, file.path)
-      for (const chunk of chunks) {
-        const score = scoreChunk(chunk, params.query, queryWords)
-        if (score > 0) {
-          allResults.push({
-            file: chunk.file,
-            lineNumber: chunk.lineStart,
-            snippet: extractSnippet(chunk.text, params.query),
-            score,
-            heading: chunk.heading,
-          })
-        }
-      }
-    }
+    const allResults = rows.length
+      ? compact(rows.map((row) => resolve(row, params.query, queryWords)).filter((row) => row.score > 0))
+      : compact(
+          files
+            .flatMap((file) => splitIntoChunks(file.content, file.path))
+            .map((chunk) => ({
+              file: chunk.file,
+              lineNumber: chunk.lineStart,
+              snippet: extractSnippet(chunk.text, params.query),
+              score: scoreChunk(chunk, params.query, queryWords),
+              heading: chunk.heading,
+            }))
+            .filter((row) => row.score > 0),
+        )
 
     // Sort by score descending
     allResults.sort((a, b) => b.score - a.score)

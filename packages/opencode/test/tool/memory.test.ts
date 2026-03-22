@@ -1,0 +1,118 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import path from "path"
+import { tmpdir } from "../fixture/fixture"
+import { Instance } from "../../src/project/instance"
+import { InstanceBootstrap } from "../../src/project/bootstrap"
+import { MemoryTool } from "../../src/tool/memory"
+import { KnowledgeSync } from "../../src/knowledge/service"
+
+const ctx = {
+  sessionID: "test-memory-session",
+  messageID: "",
+  callID: "",
+  agent: "build",
+  abort: AbortSignal.any([]),
+  messages: [],
+  metadata: () => {},
+  ask: async () => {},
+}
+
+function today() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+afterEach(async () => {
+  await Instance.disposeAll()
+})
+
+describe("tool.memory", () => {
+  test("write updates markdown source and knowledge document", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "MEMORY.md"), "# Memory\nseed\n")
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const file = path.join(tmp.path, "MEMORY.md")
+        const tool = await MemoryTool.init()
+        const result = await tool.execute({ action: "write", file: "MEMORY.md", content: "# Memory\nfrom tool" }, ctx)
+
+        expect(result.title).toBe("Updated MEMORY.md")
+        expect(result.output).toContain("Successfully wrote")
+
+        const doc = KnowledgeSync.get_document(file)
+        expect(doc).toBeDefined()
+        expect(doc?.raw).toContain("from tool")
+
+        const disk = await Bun.file(file).text()
+        expect(disk).toContain("from tool")
+        expect(disk).toContain("opencode:knowledge-sync")
+      },
+    })
+  })
+
+  test("append and read prefer knowledge DB content", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "MEMORY.md"), "# Memory\nseed\n")
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const file = path.join(tmp.path, "MEMORY.md")
+        const tool = await MemoryTool.init()
+
+        await tool.execute({ action: "append", file: "MEMORY.md", content: "new line from append" }, ctx)
+
+        const doc = KnowledgeSync.get_document(file)
+        expect(doc?.raw).toContain("new line from append")
+
+        await Bun.write(file, "# Memory\ndisk diverged\n")
+
+        const read = await tool.execute({ action: "read", file: "MEMORY.md" }, ctx)
+        expect(read.output).toContain("new line from append")
+        expect(read.output).not.toContain("disk diverged")
+      },
+    })
+  })
+
+  test("daily and lesson actions write through to DB-backed files", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "LESSONS.md"), "# Lessons Learned\n")
+        await Bun.write(path.join(dir, "memory", `${today()}.md`), `# ${today()}\n`)
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const tool = await MemoryTool.init()
+        const daily = await tool.execute({ action: "daily", content: "captured daily event" }, ctx)
+        const lesson = await tool.execute({ action: "lesson", content: "WRONG: a\nRIGHT: b\nRULE: c" }, ctx)
+
+        expect(daily.title).toContain("Daily:")
+        expect(String(daily.metadata.path)).toContain(`${path.sep}memory${path.sep}${today()}.md`)
+        const dailyDoc = KnowledgeSync.get_document(String(daily.metadata.path))
+        expect(dailyDoc?.raw).toContain("captured daily event")
+
+        expect(lesson.title).toBe("Lesson Logged")
+        expect(String(lesson.metadata.path)).toBe(path.join(tmp.path, "LESSONS.md"))
+        const lessonDoc = KnowledgeSync.get_document(path.join(tmp.path, "LESSONS.md"))
+        expect(lessonDoc?.raw).toContain("WRONG: a")
+      },
+    })
+  })
+})
