@@ -12,6 +12,7 @@ import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { Snapshot } from "../snapshot"
 import { Truncate } from "../tool/truncation"
+import { KnowledgeSync } from "@/knowledge/service"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -20,6 +21,7 @@ export async function InstanceBootstrap() {
   Format.init()
   await LSP.init()
   FileWatcher.init()
+  await KnowledgeSync.init()
   File.init()
   Vcs.init()
   Snapshot.init()
