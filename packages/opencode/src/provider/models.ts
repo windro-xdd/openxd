@@ -100,7 +100,17 @@ export namespace ModelsDev {
 
   export async function get() {
     const result = await Data()
-    return result as Record<string, Provider>
+    return Object.fromEntries(
+      Object.entries(result as Record<string, Provider>).map(([id, item]) => [
+        id,
+        id === "opencode"
+          ? {
+              ...item,
+              name: "OpenXD Zen",
+            }
+          : item,
+      ]),
+    ) as Record<string, Provider>
   }
 
   export async function refresh() {
