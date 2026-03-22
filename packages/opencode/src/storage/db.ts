@@ -80,6 +80,14 @@ export namespace Database {
     return sql.sort((a, b) => a.timestamp - b.timestamp)
   }
 
+  function compat(sql: string) {
+    return sql
+      .replace(/CREATE TABLE(?! IF NOT EXISTS)/gi, "CREATE TABLE IF NOT EXISTS")
+      .replace(/CREATE UNIQUE INDEX(?! IF NOT EXISTS)/gi, "CREATE UNIQUE INDEX IF NOT EXISTS")
+      .replace(/CREATE INDEX(?! IF NOT EXISTS)/gi, "CREATE INDEX IF NOT EXISTS")
+      .replace(/CREATE VIRTUAL TABLE(?! IF NOT EXISTS)/gi, "CREATE VIRTUAL TABLE IF NOT EXISTS")
+  }
+
   export const Client = lazy(() => {
     log.info("opening database", { path: Path })
 
@@ -90,7 +98,8 @@ export namespace Database {
     sqlite.run("PRAGMA synchronous = NORMAL")
     sqlite.run("PRAGMA busy_timeout = 5000")
     sqlite.run("PRAGMA cache_size = -64000")
-    sqlite.run("PRAGMA foreign_keys = ON")
+    // FK off during migrations to avoid ordering issues
+    sqlite.run("PRAGMA foreign_keys = OFF")
     sqlite.run("PRAGMA wal_checkpoint(PASSIVE)")
 
     const db = drizzle({ client: sqlite })
@@ -101,17 +110,24 @@ export namespace Database {
         ? OPENCODE_MIGRATIONS
         : migrations(path.join(import.meta.dirname, "../../migration"))
     if (entries.length > 0) {
+      const journal = entries.map((item) => ({
+        ...item,
+        sql: compat(item.sql),
+      }))
       log.info("applying migrations", {
-        count: entries.length,
+        count: journal.length,
         mode: typeof OPENCODE_MIGRATIONS !== "undefined" ? "bundled" : "dev",
       })
       if (Flag.OPENCODE_SKIP_MIGRATIONS) {
-        for (const item of entries) {
+        for (const item of journal) {
           item.sql = "select 1;"
         }
       }
-      migrate(db, entries)
+      migrate(db, journal)
     }
+
+    // Enable FK checks after migrations complete
+    sqlite.run("PRAGMA foreign_keys = ON")
 
     // Ensure observation FTS5 virtual table exists (created by migration, but ensure idempotent)
     try {
