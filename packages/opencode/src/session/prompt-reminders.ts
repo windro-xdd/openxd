@@ -49,7 +49,7 @@ export function injectCorrectionReminder(messages: MessageV2.WithParts[], userID
       if (part.type !== "text" || part.ignored || part.synthetic) continue
       if (!detectCorrection(part.text)) continue
       part.text +=
-        "\n\n<system-reminder>The user appears to be correcting you. IMMEDIATELY call memory(action: 'lesson', content: '...') to log what you did wrong and what to do instead. Be specific — generic lessons like 'be more careful' are useless. Then fix the issue.</system-reminder>"
+        "\n\n<system-reminder>The user appears to be correcting you. Stop and verify first: read the exact files/tool outputs involved, confirm the root cause, and only then reply with a fix. Do not answer from assumptions or memory.</system-reminder>"
       break
     }
   }
