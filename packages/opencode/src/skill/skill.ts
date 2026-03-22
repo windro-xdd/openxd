@@ -1,6 +1,7 @@
 import z from "zod"
 import path from "path"
 import os from "os"
+import matter from "gray-matter"
 import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { NamedError } from "@opencode-ai/util/error"
@@ -13,7 +14,8 @@ import { Bus } from "@/bus"
 import { Session } from "@/session"
 import { Discovery } from "./discovery"
 import { Glob } from "../util/glob"
-import { Database, sql } from "../storage/db"
+import { Hash } from "@/util/hash"
+import { KnowledgeRepo } from "@/knowledge/repo"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -51,156 +53,109 @@ export namespace Skill {
   const OPENCODE_SKILL_PATTERN = "{skill,skills}/**/SKILL.md"
   const SKILL_PATTERN = "**/SKILL.md"
 
-  const cache = {
-    async init() {
-      Database.use((db) =>
-        db.run(sql`CREATE TABLE IF NOT EXISTS skill_cache (
-          location TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          description TEXT NOT NULL,
-          triggers TEXT NOT NULL DEFAULT '[]',
-          content TEXT NOT NULL,
-          mtime INTEGER NOT NULL,
-          size INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        )`),
-      )
-      Database.use((db) => {
-        try {
-          db.run(sql`ALTER TABLE skill_cache ADD COLUMN triggers TEXT NOT NULL DEFAULT '[]'`)
-        } catch {}
+  function normalize(raw: string) {
+    const text = raw.replaceAll("\r\n", "\n").replaceAll("\r", "\n").trimEnd()
+    return text ? text + "\n" : ""
+  }
+
+  function parse(raw: string, location: string) {
+    let md
+    try {
+      md = matter(raw)
+    } catch {
+      try {
+        md = matter(ConfigMarkdown.fallbackSanitization(raw))
+      } catch (err) {
+        const message = `${location}: Failed to parse YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`
+        Bus.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() })
+        log.error("failed to parse skill", { skill: location, err })
+        return
+      }
+    }
+
+    const parsed = Info.pick({ name: true, description: true, triggers: true }).safeParse(md.data)
+    if (!parsed.success) return
+    return {
+      name: parsed.data.name,
+      description: parsed.data.description,
+      location,
+      triggers: parsed.data.triggers,
+      content: md.content,
+    } satisfies Info
+  }
+
+  function add(skills: Record<string, Info>, info: Info) {
+    if (skills[info.name]) {
+      log.warn("duplicate skill name", {
+        name: info.name,
+        existing: skills[info.name].location,
+        duplicate: info.location,
       })
-      Database.use((db) => db.run(sql`CREATE INDEX IF NOT EXISTS skill_cache_name_idx ON skill_cache(name)`))
-      Database.use((db) => db.run(sql`CREATE INDEX IF NOT EXISTS skill_cache_update_idx ON skill_cache(updated_at)`))
-      Database.use((db) =>
-        db.run(sql`CREATE VIRTUAL TABLE IF NOT EXISTS skill_cache_fts USING fts5(
-          name,
-          description,
-          triggers,
-          content,
-          tokenize='unicode61'
-        )`),
-      )
-      Database.use((db) =>
-        db.run(sql`
-          INSERT INTO skill_cache_fts (rowid, name, description, triggers, content)
-          SELECT rowid, name, description, triggers, content
-          FROM skill_cache
-          WHERE rowid NOT IN (SELECT rowid FROM skill_cache_fts)
-        `),
-      )
-    },
+    }
+    skills[info.name] = info
+  }
 
-    get(location: string, mtime: number, size: number) {
-      return Database.use((db) =>
-        db.get<{ name: string; description: string; triggers: string; content: string }>(sql`
-          SELECT name, description, triggers, content
-          FROM skill_cache
-          WHERE location = ${location} AND mtime = ${mtime} AND size = ${size}
-          LIMIT 1
-        `),
-      )
-    },
-
-    set(input: {
-      location: string
-      name: string
-      description: string
-      triggers: string[]
-      content: string
-      mtime: number
-      size: number
-    }) {
-      return Database.transaction((db) => {
-        db.run(
-          sql`DELETE FROM skill_cache_fts WHERE rowid IN (SELECT rowid FROM skill_cache WHERE location = ${input.location})`,
-        )
-        db.run(sql`
-          INSERT INTO skill_cache (location, name, description, triggers, content, mtime, size, updated_at)
-          VALUES (${input.location}, ${input.name}, ${input.description}, ${JSON.stringify(input.triggers)}, ${input.content}, ${input.mtime}, ${input.size}, ${Date.now()})
-          ON CONFLICT(location) DO UPDATE SET
-            name=excluded.name,
-            description=excluded.description,
-            triggers=excluded.triggers,
-            content=excluded.content,
-            mtime=excluded.mtime,
-            size=excluded.size,
-            updated_at=excluded.updated_at
-        `)
-        const row = db.get<{ rowid: number }>(
-          sql`SELECT rowid FROM skill_cache WHERE location = ${input.location} LIMIT 1`,
-        )
-        if (!row) return
-        db.run(sql`
-          INSERT INTO skill_cache_fts (rowid, name, description, triggers, content)
-          VALUES (${row.rowid}, ${input.name}, ${input.description}, ${input.triggers.join(" ")}, ${input.content})
-        `)
-      })
-    },
-
-    search(query: string, limit = 6) {
-      const q = query
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((x) => `${x.replaceAll('"', '""')}*`)
-        .join(" OR ")
-      if (!q) return [] as Array<{ name: string; description: string; rank: number }>
-      return Database.use((db) =>
-        db.all<{ name: string; description: string; rank: number }>(sql`
-          SELECT s.name, s.description, bm25(skill_cache_fts) AS rank
-          FROM skill_cache_fts
-          JOIN skill_cache s ON s.rowid = skill_cache_fts.rowid
-          WHERE skill_cache_fts MATCH ${q}
-          ORDER BY rank ASC
-          LIMIT ${limit}
-        `),
-      )
-    },
+  function marker(meta: unknown) {
+    try {
+      const data =
+        typeof meta === "string"
+          ? JSON.parse(meta)
+          : typeof meta === "object" && meta !== null
+            ? meta
+            : undefined
+      if (!data || typeof data !== "object") return
+      if (!("marker" in data)) return
+      const item = (data as { marker?: unknown }).marker
+      if (typeof item !== "object" || item === null) return
+      const ver = Number((item as { version?: unknown }).version)
+      if (!Number.isFinite(ver)) return
+      return ver
+    } catch {
+      return
+    }
   }
 
   export const state = Instance.state(async () => {
     const skills: Record<string, Info> = {}
     const dirs = new Set<string>()
-    await cache.init()
 
     const addSkill = async (match: string) => {
+      const location = path.resolve(match)
       const stat = Filesystem.stat(match)
-      const size = typeof stat?.size === "bigint" ? Number(stat.size) : (stat?.size ?? 0)
       const mtime = Number(stat?.mtimeMs ?? 0)
-      const hit = cache.get(match, mtime, size)
-      if (hit) {
-        if (skills[hit.name]) {
-          log.warn("duplicate skill name", {
-            name: hit.name,
-            existing: skills[hit.name].location,
-            duplicate: match,
-          })
+
+      const doc = KnowledgeRepo.get(location)
+      if (doc?.kind === "skill") {
+        const ver = marker(doc.metadata)
+        const current = ver === undefined || ver === doc.version
+        const fresh = current && Number(doc.time_source_updated ?? 0) === mtime
+        if (fresh) {
+          const info = parse(doc.raw, location)
+          if (info) {
+            dirs.add(path.dirname(location))
+            add(skills, info)
+            return
+          }
         }
-        dirs.add(path.dirname(match))
-        skills[hit.name] = {
-          name: hit.name,
-          description: hit.description,
-          location: match,
-          triggers: (() => {
-            try {
-              const arr = JSON.parse(hit.triggers || "[]")
-              return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []
-            } catch {
-              return []
-            }
-          })(),
-          content: hit.content,
+
+        const text = await Filesystem.readText(location).catch(() => undefined)
+        const hash = typeof text === "string" ? Hash.fast(normalize(text)) : undefined
+        if (hash && hash === doc.raw_hash && current) {
+          const info = parse(doc.raw, location)
+          if (info) {
+            dirs.add(path.dirname(location))
+            add(skills, info)
+            return
+          }
         }
-        return
       }
 
-      const md = await ConfigMarkdown.parse(match).catch((err) => {
+      const md = await ConfigMarkdown.parse(location).catch((err) => {
         const message = ConfigMarkdown.FrontmatterError.isInstance(err)
           ? err.data.message
-          : `Failed to parse skill ${match}`
+          : `Failed to parse skill ${location}`
         Bus.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() })
-        log.error("failed to load skill", { skill: match, err })
+        log.error("failed to load skill", { skill: location, err })
         return undefined
       })
 
@@ -209,33 +164,14 @@ export namespace Skill {
       const parsed = Info.pick({ name: true, description: true, triggers: true }).safeParse(md.data)
       if (!parsed.success) return
 
-      // Warn on duplicate skill names
-      if (skills[parsed.data.name]) {
-        log.warn("duplicate skill name", {
-          name: parsed.data.name,
-          existing: skills[parsed.data.name].location,
-          duplicate: match,
-        })
-      }
+      dirs.add(path.dirname(location))
 
-      dirs.add(path.dirname(match))
-
-      skills[parsed.data.name] = {
+      add(skills, {
         name: parsed.data.name,
         description: parsed.data.description,
-        location: match,
+        location,
         triggers: parsed.data.triggers,
         content: md.content,
-      }
-
-      await cache.set({
-        location: match,
-        name: parsed.data.name,
-        description: parsed.data.description,
-        triggers: parsed.data.triggers,
-        content: md.content,
-        mtime,
-        size,
       })
     }
 
@@ -340,7 +276,63 @@ export namespace Skill {
   }
 
   export async function search(query: string, limit = 6) {
-    await cache.init()
-    return cache.search(query, limit)
+    const text = query.trim()
+    if (!text) return [] as Array<{ name: string; description: string; rank: number }>
+    const list = await all()
+    if (!list.length) return [] as Array<{ name: string; description: string; rank: number }>
+
+    const byPath = new Map(list.map((item) => [path.resolve(item.location), item]))
+    const hits = KnowledgeRepo.search({ query: text, kind: "skill", limit: Math.max(limit * 8, 24) })
+    const ranked = new Map<string, { name: string; description: string; rank: number }>()
+
+    for (const hit of hits) {
+      const skill = byPath.get(path.resolve(hit.path))
+      if (!skill) continue
+      const prev = ranked.get(skill.name)
+      const row = {
+        name: skill.name,
+        description: skill.description,
+        rank: hit.score,
+      }
+      if (!prev || row.rank < prev.rank) {
+        ranked.set(skill.name, row)
+      }
+    }
+
+    if (ranked.size) {
+      return Array.from(ranked.values())
+        .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+        .slice(0, limit)
+    }
+
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean)
+    if (!words.length) return [] as Array<{ name: string; description: string; rank: number }>
+
+    const scored = list
+      .map((item) => {
+        const name = item.name.toLowerCase()
+        const description = item.description.toLowerCase()
+        const triggers = item.triggers.join(" ").toLowerCase()
+        const content = item.content.toLowerCase()
+        if (words.every((word) => !name.includes(word) && !description.includes(word) && !triggers.includes(word) && !content.includes(word))) {
+          return
+        }
+        const rank = words.reduce((score, word) => {
+          if (name === word) return score - 6
+          if (name.includes(word)) return score - 4
+          if (description.includes(word)) return score - 3
+          if (triggers.includes(word)) return score - 2
+          if (content.includes(word)) return score - 1
+          return score
+        }, 0)
+        return {
+          name: item.name,
+          description: item.description,
+          rank,
+        }
+      })
+      .filter((item) => item !== undefined)
+
+    return scored.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)).slice(0, limit)
   }
 }

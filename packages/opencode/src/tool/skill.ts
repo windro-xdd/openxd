@@ -43,6 +43,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
             `  <skill>`,
             `    <name>${skill.name}</name>`,
             `    <description>${skill.description}</description>`,
+            `    <location>${pathToFileURL(skill.location).href}</location>`,
             `  </skill>`,
           ]),
           "</available_skills_top>",
