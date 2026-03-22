@@ -27,6 +27,30 @@ afterEach(async () => {
 })
 
 describe("tool.memory", () => {
+  test("read keeps legacy title/metadata and resolves project .opencode path first", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Bun.write(path.join(dir, ".opencode", "MEMORY.md"), "# Memory\nproject-opencode\n")
+        await Bun.write(path.join(dir, "MEMORY.md"), "# Memory\nproject-root\n")
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const tool = await MemoryTool.init()
+        const result = await tool.execute({ action: "read", file: "MEMORY.md" }, ctx)
+
+        expect(result.title).toBe("Read MEMORY.md")
+        expect(String(result.metadata.path)).toBe(path.join(tmp.path, ".opencode", "MEMORY.md"))
+        expect(result.output).toContain("project-opencode")
+        expect(result.output).not.toContain("project-root")
+      },
+    })
+  })
+
   test("write updates markdown source and knowledge document", async () => {
     await using tmp = await tmpdir({
       git: true,
@@ -112,6 +136,24 @@ describe("tool.memory", () => {
         expect(String(lesson.metadata.path)).toBe(path.join(tmp.path, "LESSONS.md"))
         const lessonDoc = KnowledgeSync.get_document(path.join(tmp.path, "LESSONS.md"))
         expect(lessonDoc?.raw).toContain("WRONG: a")
+      },
+    })
+  })
+
+  test("read missing file keeps compatibility output and metadata", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const tool = await MemoryTool.init()
+        const result = await tool.execute({ action: "read", file: "USER.md" }, ctx)
+
+        expect(result.title).toBe("Read USER.md")
+        expect(result.output).toContain("USER.md does not exist yet")
+        expect(result.metadata.exists).toBe(false)
+        expect(String(result.metadata.path)).toContain("USER.md")
       },
     })
   })

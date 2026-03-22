@@ -306,6 +306,57 @@ describe("InstructionPrompt.system budgets and db fallback", () => {
     }
   })
 
+  test("enforces global budget cap after section caps deterministically", async () => {
+    await using projectTmp = await tmpdir({
+      config: {
+        instructions: ["commands/*.md"],
+      },
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "AGENTS.md"), "seed")
+        await Bun.write(path.join(dir, "MEMORY.md"), "seed")
+        await Bun.write(path.join(dir, "SOUL.md"), "seed")
+        await Bun.write(path.join(dir, "USER.md"), "seed")
+        await Bun.write(path.join(dir, "commands", "extra-one.md"), "seed")
+        await Bun.write(path.join(dir, "commands", "extra-two.md"), "seed")
+      },
+    })
+    await using globalTmp = await tmpdir()
+
+    const originalGlobalConfig = Global.Path.config
+    ;(Global.Path as { config: string }).config = globalTmp.path
+
+    try {
+      await Instance.provide({
+        directory: projectTmp.path,
+        fn: async () => {
+          const agents = path.join(projectTmp.path, "AGENTS.md")
+          const memory = path.join(projectTmp.path, "MEMORY.md")
+          const soul = path.join(projectTmp.path, "SOUL.md")
+          const user = path.join(projectTmp.path, "USER.md")
+          const one = path.join(projectTmp.path, "commands", "extra-one.md")
+          const two = path.join(projectTmp.path, "commands", "extra-two.md")
+
+          await KnowledgeSync.write_document({ path: agents, raw: "A".repeat(10_000) })
+          await KnowledgeSync.write_document({ path: memory, raw: "M".repeat(39_980) })
+          await KnowledgeSync.write_document({ path: soul, raw: "S".repeat(20_000) })
+          await KnowledgeSync.write_document({ path: user, raw: "U".repeat(20_000) })
+          await KnowledgeSync.write_document({ path: one, raw: "O".repeat(25_000) })
+          await KnowledgeSync.write_document({ path: two, raw: "T".repeat(20_000) })
+
+          const out = await InstructionPrompt.system()
+          const first = out.find((x) => x.startsWith(`Instructions from: ${one}\n`))
+          const second = out.find((x) => x.startsWith(`Instructions from: ${two}\n`))
+
+          expect(first?.includes("O".repeat(100))).toBe(true)
+          expect(second?.includes("T".repeat(100))).toBe(true)
+          expect(second?.includes("global instruction budget reached")).toBe(true)
+        },
+      })
+    } finally {
+      ;(Global.Path as { config: string }).config = originalGlobalConfig
+    }
+  })
+
   test("loads config instruction URLs", async () => {
     await using projectTmp = await tmpdir({
       config: {
@@ -335,6 +386,45 @@ describe("InstructionPrompt.system budgets and db fallback", () => {
         },
       })
     } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("still loads config URL instructions when DB reads fail", async () => {
+    await using projectTmp = await tmpdir({
+      config: {
+        instructions: ["https://example.com/fallback.md"],
+      },
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "AGENTS.md"), "# Root Instructions\nfrom-disk")
+      },
+    })
+
+    const originalGet = KnowledgeSync.get_document
+    const originalFetch = globalThis.fetch
+    ;(KnowledgeSync as { get_document: typeof KnowledgeSync.get_document }).get_document = () => {
+      throw new Error("db down")
+    }
+    globalThis.fetch = ((url: string | URL | Request) => {
+      if (url.toString() === "https://example.com/fallback.md") {
+        return Promise.resolve(new Response("# Remote\nfrom-url-fallback", { status: 200 }))
+      }
+      return originalFetch(url)
+    }) as typeof fetch
+
+    try {
+      await Instance.provide({
+        directory: projectTmp.path,
+        fn: async () => {
+          const out = await InstructionPrompt.system()
+          const local = out.find((x) => x.startsWith(`Instructions from: ${path.join(projectTmp.path, "AGENTS.md")}\n`))
+          const remote = out.find((x) => x.startsWith("Instructions from: https://example.com/fallback.md\n"))
+          expect(local?.includes("from-disk")).toBe(true)
+          expect(remote?.includes("from-url-fallback")).toBe(true)
+        },
+      })
+    } finally {
+      ;(KnowledgeSync as { get_document: typeof KnowledgeSync.get_document }).get_document = originalGet
       globalThis.fetch = originalFetch
     }
   })

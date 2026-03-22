@@ -4,6 +4,7 @@ import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import path from "path"
 import fs from "fs/promises"
+import { KnowledgeSync } from "../../src/knowledge/service"
 
 async function createGlobalSkill(homeDir: string) {
   const skillDir = path.join(homeDir, ".claude", "skills", "global-test-skill")
@@ -383,6 +384,111 @@ description: A skill in the .opencode/skills directory.
     fn: async () => {
       const dirs = await Skill.dirs()
       expect(dirs.length).toBe(4)
+    },
+  })
+})
+
+test("prefers fresh knowledge DB content for discovered SKILL.md", async () => {
+  await using tmp = await tmpdir({
+    git: true,
+    init: async (dir) => {
+      const skillDir = path.join(dir, ".opencode", "skill", "db-skill")
+      await Bun.write(
+        path.join(skillDir, "SKILL.md"),
+        `---
+name: db-skill
+description: A skill loaded from DB.
+---
+
+# DB Skill
+
+from-disk
+`,
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const file = path.join(tmp.path, ".opencode", "skill", "db-skill", "SKILL.md")
+      await KnowledgeSync.write_document({
+        path: file,
+        raw: `---
+name: db-skill
+description: A skill loaded from DB.
+---
+
+# DB Skill
+
+from-db
+`,
+      })
+
+      const skills = await Skill.all()
+      const skill = skills.find((s) => s.name === "db-skill")
+      expect(skill).toBeDefined()
+      expect(skill!.content).toContain("from-db")
+      expect(skill!.content).not.toContain("from-disk")
+    },
+  })
+})
+
+test("falls back to SKILL.md file when knowledge DB record is stale", async () => {
+  await using tmp = await tmpdir({
+    git: true,
+    init: async (dir) => {
+      const skillDir = path.join(dir, ".opencode", "skill", "stale-skill")
+      await Bun.write(
+        path.join(skillDir, "SKILL.md"),
+        `---
+name: stale-skill
+description: A stale fallback skill.
+---
+
+# Stale Skill
+
+disk-new
+`,
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const file = path.join(tmp.path, ".opencode", "skill", "stale-skill", "SKILL.md")
+      await KnowledgeSync.write_document({
+        path: file,
+        raw: `---
+name: stale-skill
+description: A stale fallback skill.
+---
+
+# Stale Skill
+
+db-old
+`,
+      })
+
+      await Bun.write(
+        file,
+        `---
+name: stale-skill
+description: A stale fallback skill.
+---
+
+# Stale Skill
+
+disk-new
+`,
+      )
+
+      const skills = await Skill.all()
+      const skill = skills.find((s) => s.name === "stale-skill")
+      expect(skill).toBeDefined()
+      expect(skill!.content).toContain("disk-new")
+      expect(skill!.content).not.toContain("db-old")
     },
   })
 })
