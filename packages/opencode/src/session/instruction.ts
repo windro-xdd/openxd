@@ -7,6 +7,7 @@ import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
 import { Log } from "../util/log"
 import { Glob } from "../util/glob"
+import { KnowledgeSync } from "@/knowledge/service"
 import type { MessageV2 } from "./message-v2"
 
 const log = Log.create({ service: "instruction" })
@@ -19,6 +20,49 @@ const FILES = [
 
 // Always loaded independently (not fallbacks like FILES)
 const ALWAYS_LOAD_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md", "LESSONS.md"]
+
+const FILE_CAP = 40_000
+const SECTION_CAP = {
+  identity: 40_000,
+  memory: 50_000,
+  skills: 30_000,
+  other: 50_000,
+}
+const TOTAL_CAP = 120_000
+
+type Section = keyof typeof SECTION_CAP
+
+function section(file: string, kind?: string): Section {
+  const base = path.basename(file)
+  if (kind === "skill" || base === "SKILL.md") return "skills"
+  if (base === "SOUL.md" || base === "USER.md" || base === "IDENTITY.md") return "identity"
+  if (kind === "memory" || kind === "daily") return "memory"
+  if (base === "MEMORY.md" || base === "LESSONS.md") return "memory"
+  if (/^\d{4}-\d{2}-\d{2}\.md$/.test(base) && path.basename(path.dirname(file)) === "memory") return "memory"
+  return "other"
+}
+
+function clip(raw: string, max: number, reason: string) {
+  if (max <= 0) return ""
+  if (raw.length <= max) return raw
+  const suffix = `\n\n... (truncated — ${reason})`
+  if (max <= suffix.length) return raw.slice(0, max)
+  return raw.slice(0, max - suffix.length) + suffix
+}
+
+function fromdb(file: string) {
+  try {
+    const doc = KnowledgeSync.get_document(file)
+    if (!doc?.raw) return
+    return {
+      raw: doc.raw,
+      kind: doc.kind,
+      source: "db" as const,
+    }
+  } catch {
+    return
+  }
+}
 
 function todayDate(): string {
   const d = new Date()
@@ -177,30 +221,86 @@ export namespace InstructionPrompt {
     const config = await Config.get()
     const paths = await systemPaths()
 
-    // Max chars per instruction file to prevent context window overflow
-    const MAX_INSTRUCTION_CHARS = 40_000
-    // Max total chars for all instruction files combined
-    const MAX_TOTAL_INSTRUCTION_CHARS = 120_000
-    let totalChars = 0
+    const usage: Record<Section, number> & { total: number } = {
+      identity: 0,
+      memory: 0,
+      skills: 0,
+      other: 0,
+      total: 0,
+    }
 
-    const files = Array.from(paths).map(async (p) => {
-      let content = await Filesystem.readText(p).catch(() => "")
-      if (!content) return ""
-      if (content.length > MAX_INSTRUCTION_CHARS) {
-        log.warn("instruction file truncated", { path: p, original: content.length, max: MAX_INSTRUCTION_CHARS })
-        content = content.slice(0, MAX_INSTRUCTION_CHARS) + "\n\n... (truncated — file too large for context window)"
+    const files: string[] = []
+    for (const p of paths) {
+      const row = fromdb(p)
+      let content = row?.raw
+      if (!content) {
+        content = await Filesystem.readText(p).catch(() => "")
       }
-      totalChars += content.length
-      if (totalChars > MAX_TOTAL_INSTRUCTION_CHARS) {
-        log.error("instruction content exceeded total limit — file SKIPPED (agent will miss this context)", {
+      if (!content) continue
+
+      const sec = section(p, row?.kind)
+
+      const perFile = clip(content, FILE_CAP, "file too large for context window")
+      if (perFile !== content) {
+        log.warn("instruction file truncated", {
           path: p,
-          totalChars,
-          limit: MAX_TOTAL_INSTRUCTION_CHARS,
+          source: row?.source ?? "file",
+          section: sec,
+          original: content.length,
+          max: FILE_CAP,
         })
-        return ""
+        content = perFile
       }
-      return "Instructions from: " + p + "\n" + content
-    })
+
+      const leftSection = SECTION_CAP[sec] - usage[sec]
+      if (leftSection <= 0) {
+        log.warn("instruction skipped due to section budget", {
+          path: p,
+          section: sec,
+          sectionUsed: usage[sec],
+          sectionCap: SECTION_CAP[sec],
+        })
+        continue
+      }
+
+      const perSection = clip(content, leftSection, `${sec} section budget reached`)
+      if (perSection !== content) {
+        log.warn("instruction truncated due to section budget", {
+          path: p,
+          section: sec,
+          source: row?.source ?? "file",
+          sectionUsed: usage[sec],
+          sectionCap: SECTION_CAP[sec],
+        })
+        content = perSection
+      }
+
+      const leftTotal = TOTAL_CAP - usage.total
+      if (leftTotal <= 0) {
+        log.warn("instruction skipped due to total budget", {
+          path: p,
+          source: row?.source ?? "file",
+          totalUsed: usage.total,
+          totalCap: TOTAL_CAP,
+        })
+        continue
+      }
+
+      const perTotal = clip(content, leftTotal, "global instruction budget reached")
+      if (perTotal !== content) {
+        log.warn("instruction truncated due to total budget", {
+          path: p,
+          source: row?.source ?? "file",
+          totalUsed: usage.total,
+          totalCap: TOTAL_CAP,
+        })
+        content = perTotal
+      }
+
+      usage[sec] += content.length
+      usage.total += content.length
+      files.push("Instructions from: " + p + "\n" + content)
+    }
 
     const urls: string[] = []
     if (config.instructions) {
@@ -217,7 +317,7 @@ export namespace InstructionPrompt {
         .then((x) => (x ? "Instructions from: " + url + "\n" + x : "")),
     )
 
-    return Promise.all([...files, ...fetches]).then((result) => result.filter(Boolean))
+    return Promise.all(fetches).then((result) => [...files, ...result.filter(Boolean)])
   }
 
   export function loaded(messages: MessageV2.WithParts[]) {
