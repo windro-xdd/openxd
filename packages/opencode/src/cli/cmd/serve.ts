@@ -10,7 +10,7 @@ import { BrowserCDP } from "../../browser/cdp"
 export const ServeCommand = cmd({
   command: "serve",
   builder: (yargs) => withNetworkOptions(yargs),
-  describe: "starts a headless opencode server",
+  describe: "starts a headless openxd server",
   handler: async (args) => {
     if (!Flag.OPENCODE_SERVER_PASSWORD) {
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
@@ -22,7 +22,7 @@ export const ServeCommand = cmd({
         const opts = await resolveNetworkOptions(args)
         if (!opts.port) opts.port = 4096
         const server = Server.listen(opts)
-        console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
+        console.log(`openxd server listening on http://${server.hostname}:${server.port}`)
 
         await TelegramBot.start()
         await Heartbeat.start()

@@ -6,7 +6,7 @@ import { git } from "@/util/git"
 
 export const PrCommand = cmd({
   command: "pr <number>",
-  describe: "fetch and checkout a GitHub PR branch, then run opencode",
+  describe: "fetch and checkout a GitHub PR branch, then run openxd",
   builder: (yargs) =>
     yargs.positional("number", {
       type: "number",
@@ -82,15 +82,15 @@ export const PrCommand = cmd({
               })
             }
 
-            // Check for opencode session link in PR body
+            // Check for openxd session link in PR body
             if (prInfo && prInfo.body) {
               const sessionMatch = prInfo.body.match(/https:\/\/opncd\.ai\/s\/([a-zA-Z0-9_-]+)/)
               if (sessionMatch) {
                 const sessionUrl = sessionMatch[0]
-                UI.println(`Found opencode session: ${sessionUrl}`)
+                UI.println(`Found openxd session: ${sessionUrl}`)
                 UI.println(`Importing session...`)
 
-                const importResult = await Process.text(["opencode", "import", sessionUrl], {
+                const importResult = await Process.text(["openxd", "import", sessionUrl], {
                   nothrow: true,
                 })
                 if (importResult.code === 0) {
@@ -109,23 +109,23 @@ export const PrCommand = cmd({
 
         UI.println(`Successfully checked out PR #${prNumber} as branch '${localBranchName}'`)
         UI.println()
-        UI.println("Starting opencode...")
+        UI.println("Starting openxd...")
         UI.println()
 
-        // Launch opencode TUI with session ID if available
+        // Launch openxd TUI with session ID if available
         const { spawn } = await import("child_process")
-        const opencodeArgs = sessionId ? ["-s", sessionId] : []
-        const opencodeProcess = spawn("opencode", opencodeArgs, {
+        const openxdArgs = sessionId ? ["-s", sessionId] : []
+        const openxdProcess = spawn("openxd", openxdArgs, {
           stdio: "inherit",
           cwd: process.cwd(),
         })
 
         await new Promise<void>((resolve, reject) => {
-          opencodeProcess.on("exit", (code) => {
+          openxdProcess.on("exit", (code) => {
             if (code === 0) resolve()
-            else reject(new Error(`opencode exited with code ${code}`))
+            else reject(new Error(`openxd exited with code ${code}`))
           })
-          opencodeProcess.on("error", reject)
+          openxdProcess.on("error", reject)
         })
       },
     })

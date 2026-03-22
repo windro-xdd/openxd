@@ -31,7 +31,7 @@ Write these files to the working directory using the write tool.
 Be conversational and natural. Don't dump all questions at once — have a real back-and-forth conversation.
 Start with a brief intro and your first question.
 
-IMPORTANT: After creating all files, tell the user they're all set and how to start using you (just run opencode normally).`
+IMPORTANT: After creating all files, tell the user they're all set and how to start using you (just run openxd normally).`
 
 export const BootCommand = cmd({
   command: "boot",

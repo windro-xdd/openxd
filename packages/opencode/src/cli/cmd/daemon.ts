@@ -5,7 +5,7 @@ import fs from "fs"
 import { Global } from "../../global"
 
 const DAEMON_PORT = 4096
-const SERVICE_NAME = "opencode"
+const SERVICE_NAME = "openxd"
 
 function getServicePath(): string {
   const platform = os.platform()
@@ -21,23 +21,23 @@ function getServicePath(): string {
 }
 
 function findOpenCodeBin(): string {
-  // Try to find the opencode binary
+  // Try to find the openxd binary
   const candidates = [
     process.argv[1], // current script
-    path.join(os.homedir(), ".local", "bin", "opencode"),
-    "/usr/local/bin/opencode",
-    "/usr/bin/opencode",
+    path.join(os.homedir(), ".local", "bin", "openxd"),
+    "/usr/local/bin/openxd",
+    "/usr/bin/openxd",
   ]
   for (const candidate of candidates) {
     if (candidate && fs.existsSync(candidate)) return candidate
   }
   // Fallback: assume it's in PATH
-  return "opencode"
+  return "openxd"
 }
 
 function generateSystemdUnit(bin: string, port: number): string {
   return `[Unit]
-Description=OpenCode Server
+Description=OpenXD Server
 After=network.target
 
 [Service]
@@ -58,7 +58,7 @@ function generateLaunchdPlist(bin: string, port: number): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.opencode.daemon</string>
+  <string>com.openxd.daemon</string>
   <key>ProgramArguments</key>
   <array>
     <string>${bin}</string>
@@ -84,7 +84,7 @@ function generateLaunchdPlist(bin: string, port: number): string {
 
 const InstallCommand = cmd({
   command: "install",
-  describe: "Install opencode as a background service (systemd/launchd)",
+  describe: "Install openxd as a background service (systemd/launchd)",
   builder: (yargs) =>
     yargs.option("port", {
       type: "number",
@@ -120,7 +120,7 @@ const InstallCommand = cmd({
 
 const UninstallCommand = cmd({
   command: "uninstall",
-  describe: "Remove the opencode background service",
+  describe: "Remove the openxd background service",
   builder: (yargs) => yargs,
   handler: async () => {
     const servicePath = getServicePath()
@@ -161,7 +161,7 @@ const UninstallCommand = cmd({
 
 const StatusCommand = cmd({
   command: "status",
-  describe: "Check if the opencode daemon is running",
+  describe: "Check if the openxd daemon is running",
   builder: (yargs) =>
     yargs.option("port", {
       type: "number",
@@ -192,7 +192,7 @@ const StatusCommand = cmd({
           console.log(`  Start with: launchctl load ${servicePath}`)
         }
       } else {
-        console.log(`  Service not installed. Run: opencode daemon install`)
+        console.log(`  Service not installed. Run: openxd daemon install`)
       }
     }
   },
@@ -200,8 +200,7 @@ const StatusCommand = cmd({
 
 export const DaemonCommand = cmd({
   command: "daemon",
-  describe: "Manage the opencode background daemon",
-  builder: (yargs) =>
-    yargs.command(InstallCommand).command(UninstallCommand).command(StatusCommand).demandCommand(),
+  describe: "Manage the openxd background daemon",
+  builder: (yargs) => yargs.command(InstallCommand).command(UninstallCommand).command(StatusCommand).demandCommand(),
   handler: async () => {},
 })
