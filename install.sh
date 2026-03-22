@@ -83,18 +83,28 @@ if [ ! -f "$BIN" ]; then
 fi
 
 ln -sf "$BIN" "$BIN_DIR/openxd"
+TARGET="$BIN_DIR/openxd"
 
-# Check if bin dir is in PATH
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+if [ -w "/usr/local/bin" ]; then
+  ln -sf "$BIN" "/usr/local/bin/openxd"
+  TARGET="/usr/local/bin/openxd"
+fi
+
+hash -r 2>/dev/null || true
+
+# Check if command is available in current shell
+if ! command -v openxd >/dev/null 2>&1; then
   echo ""
-  echo "⚠️  Add $BIN_DIR to your PATH:"
+  echo "⚠️  'openxd' is installed but not on your current PATH."
   echo ""
+  echo "Add $BIN_DIR to your PATH:"
   echo "  export PATH=\"$BIN_DIR:\$PATH\""
   echo ""
-  echo "Add this to your shell config (~/.bashrc, ~/.zshrc, etc.)"
+  echo "Then reload your shell config (~/.bashrc, ~/.zshrc, etc.)"
+  echo "Or run directly: $TARGET"
 fi
 
 echo ""
 echo "✅ OpenXD installed successfully!"
 echo ""
-echo "Run: openxd"
+echo "Run: $TARGET"
