@@ -54,6 +54,7 @@ import {
   STRUCTURED_OUTPUT_SYSTEM_PROMPT,
 } from "./prompt-structured-output"
 import { injectCorrectionReminder, injectQueuedUserReminder } from "./prompt-reminders"
+import { detectCorrection, LessonGuard, relevantLessons } from "./lesson"
 import { applyTokenPreflight } from "./prompt-budget"
 import { resolveTools as resolveToolsInner } from "./prompt-tools"
 
@@ -741,6 +742,11 @@ export namespace SessionPrompt {
       // Check if user explicitly invoked an agent via @ in this turn
       const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
       const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
+      const correction = lastUserMsg?.parts
+        .filter((p): p is MessageV2.TextPart => p.type === "text" && !p.synthetic && !p.ignored)
+        .map((p) => p.text)
+        .find((p) => detectCorrection(p))
+      const lessonStat = correction ? await LessonGuard.observe({ sessionID, text: correction }) : undefined
 
       const tools = await resolveTools({
         agent,
@@ -750,6 +756,17 @@ export namespace SessionPrompt {
         processor,
         bypassAgentCheck,
         messages: msgs,
+        beforeExecute: async (ctx) => {
+          const block = await LessonGuard.block({
+            sessionID,
+            tool: ctx.tool,
+            args: ctx.args,
+          })
+          if (!block) return
+          throw new Error(
+            `Blocked by lesson guard (score=${block.score}): ${block.rule}. Adjust the plan first and avoid repeating the same mistake.`,
+          )
+        },
       })
 
       // Inject StructuredOutput tool if JSON schema mode enabled
@@ -784,6 +801,49 @@ export namespace SessionPrompt {
       const format = lastUser.format ?? { type: "text" }
       if (format.type === "json_schema") {
         system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+      }
+
+      {
+        const ids = Object.keys(tools).sort()
+        const hasWeb = ids.includes("websearch")
+        const hasCode = ids.includes("codesearch")
+        system.push(
+          [
+            "<tool-availability>",
+            `Available tools this turn: ${ids.join(", ") || "none"}.`,
+            "Never call tools that are not in this list.",
+            !hasWeb && !hasCode
+              ? "Web research tools are unavailable for this turn; do not attempt websearch or codesearch. Use available alternatives."
+              : !hasWeb
+                ? "websearch is unavailable for this turn; do not call websearch."
+                : !hasCode
+                  ? "codesearch is unavailable for this turn; do not call codesearch."
+                  : "",
+            "</tool-availability>",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        )
+      }
+
+      if (correction) {
+        const tips = relevantLessons({ query: correction, max: 3 })
+        if (tips.length) {
+          system.push(
+            [
+              "<lesson-reminder>",
+              "Relevant lessons from LESSONS.md:",
+              ...tips.map((x, i) => `${i + 1}. ${x}`),
+              lessonStat
+                ? `Repeat-error rate this session: ${Math.round(lessonStat.rate * 100)}% (${lessonStat.repeats}/${lessonStat.total}).`
+                : "",
+              "Apply these lessons while fixing the user's correction.",
+              "</lesson-reminder>",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          )
+        }
       }
 
       // Inject active mode prompt into system context
@@ -985,6 +1045,7 @@ export namespace SessionPrompt {
     processor: SessionProcessor.Info
     bypassAgentCheck: boolean
     messages: MessageV2.WithParts[]
+    beforeExecute?: (ctx: { tool: string; callID: string; args: unknown }) => Promise<void>
   }) {
     return resolveToolsInner(input, log)
   }

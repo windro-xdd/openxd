@@ -24,6 +24,7 @@ type Input = {
   processor: SessionProcessor.Info
   bypassAgentCheck: boolean
   messages: MessageV2.WithParts[]
+  beforeExecute?: (ctx: { tool: string; callID: string; args: unknown }) => Promise<void>
 }
 
 type CtxArgs = Record<string, unknown>
@@ -70,6 +71,10 @@ function toolCtx(input: Input) {
   })
 }
 
+function maybe(input: Input, tool: string, callID: string, args: unknown) {
+  return input.beforeExecute?.({ tool, callID, args })
+}
+
 export async function resolveTools(input: Input, log: Logger): Promise<Record<string, AITool>> {
   using _ = log.time("resolveTools")
   const tools: Record<string, AITool> = {}
@@ -85,6 +90,7 @@ export async function resolveTools(input: Input, log: Logger): Promise<Record<st
       inputSchema: jsonSchema(schema as Parameters<typeof jsonSchema>[0]),
       async execute(args, options) {
         const ctx = context(args as CtxArgs, options)
+        await maybe(input, item.id, ctx.callID ?? options.toolCallId, args)
         await Plugin.trigger(
           "tool.execute.before",
           {
@@ -142,6 +148,7 @@ export async function resolveTools(input: Input, log: Logger): Promise<Record<st
     item.inputSchema = jsonSchema(transformed as Parameters<typeof jsonSchema>[0])
     item.execute = async (args, opts) => {
       const ctx = context(args as CtxArgs, opts)
+      await maybe(input, key, ctx.callID ?? opts.toolCallId, args)
 
       await Plugin.trigger(
         "tool.execute.before",

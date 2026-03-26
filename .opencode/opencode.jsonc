@@ -4,6 +4,19 @@
     "opencode": {
       "options": {},
     },
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "apiKey": ""
+      },
+      "models": {
+        "qwen-fast": {
+          "name": "Qwen Fast"
+        }
+      }
+    },
   },
   "permission": {
     "edit": {

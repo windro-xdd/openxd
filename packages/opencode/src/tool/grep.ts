@@ -67,7 +67,7 @@ export const GrepTool = Tool.define("grep", {
       return {
         title: params.pattern,
         metadata: { matches: 0, truncated: false },
-        output: `No files found matching pattern "${params.pattern}"${params.include ? ` in files matching "${params.include}"` : ""}${params.path ? ` under ${params.path}` : ""}. Check that the regex pattern is correct and the search path exists.`,
+        output: "No files found",
       }
     }
 

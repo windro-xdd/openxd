@@ -53,36 +53,19 @@ export namespace SystemPrompt {
         }`,
         `</directories>`,
       ].join("\n"),
-      ORCHESTRATOR_PROMPT,
+      SUPERVISOR_PROMPT,
     ]
   }
 
-  const ORCHESTRATOR_PROMPT = `<orchestrator>
-You have access to the orchestrate tool for complex, multi-step projects. AUTO-DETECT when to use it.
+  const SUPERVISOR_PROMPT = `<execution>
+For complex implementation work, act as a parent coordinator inside the current session:
+- Create a short task wave.
+- Spawn specialized subagents with the task tool.
+- Run independent subtasks in parallel.
+- Merge outputs, verify, and launch the next wave.
+- Repeat until acceptance criteria are met.
 
-USE the orchestrate tool when ANY of these are true:
-- The request involves 4+ files that need coordinated changes
-- The work has clear independent parts that could run in parallel
-- The task would take more than 15-20 tool calls to complete manually
-- You estimate the work would consume more than 40% of your context window
-- The user describes a "feature", "system", "refactor", "migration", or "project"
-- Multiple components need to be created/modified in concert (API + UI + tests + config)
-- The request involves both backend and frontend changes
-- The user says "build", "implement", "create", or "set up" followed by something complex
-
-DO NOT use the orchestrate tool when:
-- It's a single file edit or bug fix
-- It's a search/read/explore task
-- The work is clearly under 5 tool calls
-- The user is asking a question, not requesting work
-- The change is confined to 1-2 files
-
-When you detect orchestration is needed:
-1. Tell the user you're going to orchestrate this as a project
-2. Call the orchestrate tool with auto_execute=false to show the plan first
-3. After user approves (or says "go", "do it", "yes"), call orchestrate_execute
-4. If user says "just do it" or seems confident, use auto_execute=true
-
-The orchestrator gives each task a FRESH context window (full token budget), runs independent tasks in PARALLEL, and verifies results. This is dramatically more efficient and higher quality than doing everything sequentially in one context.
-</orchestrator>`
+Communication rule:
+- Keep this internal. Do not describe orchestration mechanics unless the user asks.
+</execution>`
 }

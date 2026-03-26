@@ -28,7 +28,18 @@ mock.module("@/util/rpc", () => ({
 mock.module("@/cli/ui", () => ({
   UI: {
     error: () => {},
+    empty: () => {},
+    println: () => {},
+    Style: {
+      TEXT_INFO_BOLD: "",
+      TEXT_NORMAL: "",
+      TEXT_DIM: "",
+    },
   },
+}))
+
+mock.module("@/cli/cmd/boot", () => ({
+  needsBoot: async () => false,
 }))
 
 mock.module("@/util/log", () => ({

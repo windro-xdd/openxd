@@ -6,6 +6,7 @@ import { Instance } from "../project/instance"
 import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
 import { KnowledgeSync } from "../knowledge/service"
+import { assessLesson } from "@/session/lesson"
 
 const MEMORY_FILES = ["MEMORY.md", "SOUL.md", "USER.md", "IDENTITY.md", "LESSONS.md"]
 const DAILY_PATTERN = /^memory\/\d{4}-\d{2}-\d{2}\.md$/
@@ -170,8 +171,19 @@ Actions:
         (await load(filePath)) ??
         `# Lessons Learned\n\nThings I got wrong and what to do instead. I review this at the start of tasks to avoid repeating mistakes.\n`
 
+      const quality = assessLesson({ content: params.content, existing })
+      if (!quality.ok) {
+        return {
+          title: "Error",
+          output: quality.reason ?? "Lesson quality check failed.",
+          metadata: {
+            duplicate: quality.duplicate,
+          },
+        }
+      }
+
       const timestamp = new Date().toISOString().split("T")[0]
-      const newContent = existing.trimEnd() + `\n\n### ${timestamp}\n${params.content}`
+      const newContent = existing.trimEnd() + `\n\n### ${timestamp}\n${quality.normalized}`
       await store(filePath, newContent)
       return {
         title: "Lesson Logged",

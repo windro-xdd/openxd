@@ -1,0 +1,13 @@
+Coordinate a wave of subagent tasks from one call.
+
+Use this when you already know the subtasks and want to execute them in parallel with one tool call.
+
+Behavior:
+- Validates and dispatches each subtask through the existing task tool
+- Runs in parallel by default (configurable concurrency)
+- Continues remaining tasks even if one fails
+- Returns a compact merged report with success/failure per subtask
+
+Notes:
+- This is a thin coordinator over the task tool, not a separate orchestration engine.
+- Prefer this for 2+ independent subtasks; for one subtask, call task directly.

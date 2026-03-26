@@ -16,6 +16,7 @@ import { Discovery } from "./discovery"
 import { Glob } from "../util/glob"
 import { Hash } from "@/util/hash"
 import { KnowledgeRepo } from "@/knowledge/repo"
+import { FileWatcher } from "@/file/watcher"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -119,8 +120,21 @@ export namespace Skill {
     const skills: Record<string, Info> = {}
     const dirs = new Set<string>()
 
+    const drop = (location: string) => {
+      const full = path.resolve(location)
+      for (const [name, item] of Object.entries(skills)) {
+        if (path.resolve(item.location) !== full) continue
+        delete skills[name]
+      }
+
+      const dir = path.dirname(full)
+      const used = Object.values(skills).some((item) => path.dirname(path.resolve(item.location)) === dir)
+      if (!used) dirs.delete(dir)
+    }
+
     const addSkill = async (match: string) => {
       const location = path.resolve(match)
+      drop(location)
       const stat = Filesystem.stat(match)
       const mtime = Number(stat?.mtimeMs ?? 0)
 
@@ -257,11 +271,22 @@ export namespace Skill {
       }
     }
 
+    const unsub = Bus.subscribe(FileWatcher.Event.Updated, async (evt) => {
+      if (path.basename(evt.properties.file) !== "SKILL.md") return
+      const location = path.resolve(evt.properties.file)
+      if (evt.properties.event === "unlink") {
+        drop(location)
+        return
+      }
+      await addSkill(location)
+    })
+
     return {
       skills,
-      dirs: Array.from(dirs),
+      dirs,
+      unsub,
     }
-  })
+  }, async (s) => s.unsub?.())
 
   export async function get(name: string) {
     return state().then((x) => x.skills[name])
@@ -272,7 +297,7 @@ export namespace Skill {
   }
 
   export async function dirs() {
-    return state().then((x) => x.dirs)
+    return state().then((x) => Array.from(x.dirs))
   }
 
   export async function search(query: string, limit = 6) {

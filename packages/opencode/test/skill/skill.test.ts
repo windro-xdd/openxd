@@ -5,6 +5,8 @@ import { tmpdir } from "../fixture/fixture"
 import path from "path"
 import fs from "fs/promises"
 import { KnowledgeSync } from "../../src/knowledge/service"
+import { Bus } from "../../src/bus"
+import { FileWatcher } from "../../src/file/watcher"
 
 async function createGlobalSkill(homeDir: string) {
   const skillDir = path.join(homeDir, ".claude", "skills", "global-test-skill")
@@ -489,6 +491,61 @@ disk-new
       expect(skill).toBeDefined()
       expect(skill!.content).toContain("disk-new")
       expect(skill!.content).not.toContain("db-old")
+    },
+  })
+})
+
+test("updates skill cache immediately on SKILL.md add/change/unlink events", async () => {
+  await using tmp = await tmpdir({ git: true })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await Skill.all()
+
+      const file = path.join(tmp.path, ".opencode", "skill", "live-skill", "SKILL.md")
+      await Bun.write(
+        file,
+        `---
+name: live-skill
+description: Live skill description.
+---
+
+# Live Skill
+
+v1
+`,
+      )
+      await Bus.publish(FileWatcher.Event.Updated, { file, event: "add" })
+
+      const first = await Skill.all()
+      const created = first.find((s) => s.name === "live-skill")
+      expect(created).toBeDefined()
+      expect(created!.content).toContain("v1")
+
+      await Bun.write(
+        file,
+        `---
+name: live-skill
+description: Live skill description.
+---
+
+# Live Skill
+
+v2
+`,
+      )
+      await Bus.publish(FileWatcher.Event.Updated, { file, event: "change" })
+
+      const second = await Skill.all()
+      const updated = second.find((s) => s.name === "live-skill")
+      expect(updated).toBeDefined()
+      expect(updated!.content).toContain("v2")
+
+      await fs.unlink(file)
+      await Bus.publish(FileWatcher.Event.Updated, { file, event: "unlink" })
+      const third = await Skill.all()
+      expect(third.find((s) => s.name === "live-skill")).toBeUndefined()
     },
   })
 })

@@ -7,7 +7,6 @@ import { GrepTool } from "./grep"
 import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
-import { OrchestratorTool, OrchestratorExecuteTool, OrchestratorStatusTool } from "./orchestrate"
 import { TodoWriteTool, TodoReadTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -43,6 +42,7 @@ import { BatchEditTool } from "./batch_edit"
 import { DepsTool } from "./deps"
 import { RepomapTool } from "./repomap"
 import { ListTool } from "./ls"
+import { SupervisorTool } from "./supervisor"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -124,9 +124,7 @@ export namespace ToolRegistry {
       EditTool,
       WriteTool,
       TaskTool,
-      OrchestratorTool,
-      OrchestratorExecuteTool,
-      OrchestratorStatusTool,
+      SupervisorTool,
       WebFetchTool,
       TodoWriteTool,
       // TodoReadTool,

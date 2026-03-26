@@ -125,7 +125,14 @@ describe("tool.memory", () => {
       fn: async () => {
         const tool = await MemoryTool.init()
         const daily = await tool.execute({ action: "daily", content: "captured daily event" }, ctx)
-        const lesson = await tool.execute({ action: "lesson", content: "WRONG: a\nRIGHT: b\nRULE: c" }, ctx)
+        const lesson = await tool.execute(
+          {
+            action: "lesson",
+            content:
+              "WRONG: I misread the current profile state and gave outdated advice.\nRIGHT: Check current state before giving profile edits.\nRULE: Verify live state before prescriptive edits.",
+          },
+          ctx,
+        )
 
         expect(daily.title).toContain("Daily:")
         expect(String(daily.metadata.path)).toContain(`${path.sep}memory${path.sep}${today()}.md`)
@@ -135,7 +142,66 @@ describe("tool.memory", () => {
         expect(lesson.title).toBe("Lesson Logged")
         expect(String(lesson.metadata.path)).toBe(path.join(tmp.path, "LESSONS.md"))
         const lessonDoc = KnowledgeSync.get_document(path.join(tmp.path, "LESSONS.md"))
-        expect(lessonDoc?.raw).toContain("WRONG: a")
+        expect(lessonDoc?.raw).toContain("WRONG: I misread the current profile state")
+      },
+    })
+  })
+
+  test("lesson action enforces WRONG/RIGHT/RULE format", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const tool = await MemoryTool.init()
+        const result = await tool.execute({ action: "lesson", content: "generic lesson text" }, ctx)
+
+        expect(result.title).toBe("Error")
+        expect(result.output).toContain("Lesson format invalid")
+      },
+    })
+  })
+
+  test("lesson action deduplicates against indexed history", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "LESSONS.md"),
+          [
+            "# Lessons Learned",
+            "",
+            "### 2026-03-20",
+            "WRONG: I skipped typecheck before release.",
+            "RIGHT: Run typecheck before release.",
+            "RULE: Verify before release.",
+            "",
+          ].join("\n"),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await KnowledgeSync.write_document({
+          path: path.join(tmp.path, "LESSONS.md"),
+          raw: await Bun.file(path.join(tmp.path, "LESSONS.md")).text(),
+        })
+        const tool = await MemoryTool.init()
+        const result = await tool.execute(
+          {
+            action: "lesson",
+            content:
+              "WRONG: I skipped typecheck before release.\nRIGHT: Run typecheck before release.\nRULE: Verify before release.",
+          },
+          ctx,
+        )
+
+        expect(result.title).toBe("Error")
+        expect(result.output).toContain("Duplicate lesson")
       },
     })
   })

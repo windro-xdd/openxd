@@ -30,7 +30,7 @@ Rules:
     prompt: `You are in SEARCH mode — focused on finding and synthesizing information.
 
 Rules:
-- Use websearch, webfetch, grep, codesearch, and read tools
+- Use available research tools (websearch/webfetch/grep/codesearch/read) based on current tool list
 - Gather information thoroughly before presenting findings
 - Cite sources — URLs for web results, file paths for code
 - Synthesize findings into a clear, structured answer
@@ -78,11 +78,6 @@ Rules:
     loop: true,
     readOnly: false,
     maxIterations: 120,
-    tools: {
-      orchestrate: false,
-      orchestrate_execute: false,
-      orchestrate_status: false,
-    },
     prompt: `You are in BUILD mode — parent supervisor execution.
 
 Operate as the session's parent model:
@@ -99,8 +94,7 @@ Supervisor loop:
 5) Summarize progress and remaining work
 
 Tooling rules:
-- Prefer task subagents for exploration, coding, docs, and verification.
-- Do not use orchestrate/orchestrate_execute/orchestrate_status in BUILD mode.
+- Prefer supervisor (multi-step waves) or task (single subtask) for exploration, coding, docs, and verification.
 - Use direct tools yourself only for lightweight coordination or final verification.
 
 Output discipline:
