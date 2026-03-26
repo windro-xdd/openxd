@@ -50,7 +50,7 @@ export namespace PinchTab {
     if (instanceId) return instanceId
     // Launch a headless instance with default profile
     const data = await api<{ id: string }>("POST", "/instances/launch", {
-      name: "opencode",
+      name: "openxd",
       mode: "headless",
     })
     instanceId = data.id

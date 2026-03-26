@@ -180,10 +180,10 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "opencode-ai"],
-      pnpm: ["pnpm", "uninstall", "-g", "opencode-ai"],
-      bun: ["bun", "remove", "-g", "opencode-ai"],
-      yarn: ["yarn", "global", "remove", "opencode-ai"],
+      npm: ["npm", "uninstall", "-g", "openxd-ai"],
+      pnpm: ["pnpm", "uninstall", "-g", "openxd-ai"],
+      bun: ["bun", "remove", "-g", "openxd-ai"],
+      yarn: ["yarn", "global", "remove", "openxd-ai"],
       brew: ["brew", "uninstall", "openxd"],
       choco: ["choco", "uninstall", "openxd"],
       scoop: ["scoop", "uninstall", "openxd"],
@@ -192,7 +192,7 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
     const cmd = cmds[method]
     if (cmd) {
       spinner.start(`Running ${cmd.join(" ")}...`)
-      const result = await Process.run(method === "choco" ? ["choco", "uninstall", "opencode", "-y", "-r"] : cmd, {
+      const result = await Process.run(method === "choco" ? ["choco", "uninstall", "openxd", "-y", "-r"] : cmd, {
         nothrow: true,
       })
       if (result.code !== 0) {
@@ -266,7 +266,7 @@ async function getShellConfigFile(): Promise<string | null> {
     if (!exists) continue
 
     const content = await Filesystem.readText(file).catch(() => "")
-    if (content.includes("# openxd") || content.includes(".opencode/bin")) {
+    if (content.includes("# openxd") || content.includes(".openxd/bin")) {
       return file
     }
   }
@@ -291,13 +291,13 @@ async function cleanShellConfig(file: string) {
 
     if (skip) {
       skip = false
-      if (trimmed.includes(".opencode/bin") || trimmed.includes("fish_add_path")) {
+      if (trimmed.includes(".openxd/bin") || trimmed.includes("fish_add_path")) {
         continue
       }
     }
 
     if (
-      (trimmed.startsWith("export PATH=") && trimmed.includes(".opencode/bin")) ||
+      (trimmed.startsWith("export PATH=") && trimmed.includes(".openxd/bin")) ||
       (trimmed.startsWith("fish_add_path") && trimmed.includes(".opencode"))
     ) {
       continue

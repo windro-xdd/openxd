@@ -7,7 +7,7 @@ import type {
   PullRequestEvent,
 } from "@octokit/webhooks-types"
 
-export const AGENT_USERNAME = "opencode-agent[bot]"
+export const AGENT_USERNAME = "openxd-agent[bot]"
 export const AGENT_REACTION = "eyes"
 
 export const USER_EVENTS = ["issue_comment", "pull_request_review_comment", "issues", "pull_request"] as const

@@ -37,7 +37,7 @@ export const CUSTOM_LOADERS: Record<string, CustomLoader> = {
       if (input.env.some((item) => env[item])) return true
       if (await Auth.get(input.id)) return true
       const cfg = await Config.get()
-      if (cfg.provider?.["opencode"]?.options?.apiKey) return true
+      if (cfg.provider?.["openxd"]?.options?.apiKey) return true
       return false
     })()
 
@@ -154,8 +154,8 @@ export const CUSTOM_LOADERS: Record<string, CustomLoader> = {
       autoload: false,
       options: {
         headers: {
-          "HTTP-Referer": "https://opencode.ai/",
-          "X-Title": "opencode",
+          "HTTP-Referer": "https://openxd.ai/",
+          "X-Title": "openxd",
         },
       },
     }
@@ -165,8 +165,8 @@ export const CUSTOM_LOADERS: Record<string, CustomLoader> = {
       autoload: false,
       options: {
         headers: {
-          "http-referer": "https://opencode.ai/",
-          "x-title": "opencode",
+          "http-referer": "https://openxd.ai/",
+          "x-title": "openxd",
         },
       },
     }
@@ -241,8 +241,8 @@ export const CUSTOM_LOADERS: Record<string, CustomLoader> = {
       autoload: false,
       options: {
         headers: {
-          "HTTP-Referer": "https://opencode.ai/",
-          "X-Title": "opencode",
+          "HTTP-Referer": "https://openxd.ai/",
+          "X-Title": "openxd",
         },
       },
     }
@@ -374,7 +374,7 @@ export const CUSTOM_LOADERS: Record<string, CustomLoader> = {
       autoload: false,
       options: {
         headers: {
-          "X-Cerebras-3rd-Party-Integration": "opencode",
+          "X-Cerebras-3rd-Party-Integration": "openxd",
         },
       },
     }
@@ -384,8 +384,8 @@ export const CUSTOM_LOADERS: Record<string, CustomLoader> = {
       autoload: false,
       options: {
         headers: {
-          "HTTP-Referer": "https://opencode.ai/",
-          "X-Title": "opencode",
+          "HTTP-Referer": "https://openxd.ai/",
+          "X-Title": "openxd",
         },
       },
     }

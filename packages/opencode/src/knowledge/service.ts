@@ -10,7 +10,7 @@ import { kind, list, source, type Kind } from "./paths"
 import { KnowledgeRepo } from "./repo"
 
 const log = Log.create({ service: "knowledge.sync" })
-const TAG = "opencode:knowledge-sync"
+const TAG = "openxd:knowledge-sync"
 
 function esc(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

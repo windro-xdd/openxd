@@ -89,7 +89,7 @@ export namespace Project {
   }
 
   function readCachedId(dir: string) {
-    return Filesystem.readText(path.join(dir, "opencode"))
+    return Filesystem.readText(path.join(dir, "openxd"))
       .then((x) => x.trim())
       .catch(() => undefined)
   }
@@ -169,7 +169,7 @@ export namespace Project {
 
           id = roots[0]
           if (id) {
-            await Filesystem.write(path.join(dotgit, "opencode"), id).catch(() => undefined)
+            await Filesystem.write(path.join(dotgit, "openxd"), id).catch(() => undefined)
           }
         }
 

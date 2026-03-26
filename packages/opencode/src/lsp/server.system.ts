@@ -215,7 +215,7 @@ export const JDTLS: Info = {
       dist,
       process.platform === "darwin" ? "config_mac" : process.platform === "win32" ? "config_win" : "config_linux",
     )
-    const data = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-jdtls-data"))
+    const data = await fs.mkdtemp(path.join(os.tmpdir(), "openxd-jdtls-data"))
     return {
       process: spawn(
         java,

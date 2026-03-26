@@ -13,7 +13,7 @@ type Input = {
 
 export async function getOidcToken() {
   try {
-    return await core.getIDToken("opencode-github-action")
+    return await core.getIDToken("openxd-github-action")
   } catch (e) {
     console.error("Failed to get OIDC token:", e instanceof Error ? e.message : e)
     throw new Error("Could not fetch an OIDC token. Make sure to add `id-token: write` to your workflow permissions.")

@@ -167,7 +167,7 @@ export const BashTool = Tool.define("bash", async () => {
         { env: {} },
       )
       const askpassScript = path.join(path.dirname(fileURLToPath(import.meta.url)), "askpass.sh")
-      const sudoPassFile = path.join(os.homedir(), ".config", "opencode", ".sudo-pass")
+      const sudoPassFile = path.join(os.homedir(), ".config", "openxd", ".sudo-pass")
       const hasSudoPass = await Filesystem.exists(sudoPassFile)
 
       // Auto-rewrite `sudo` to `sudo -A` when askpass is configured

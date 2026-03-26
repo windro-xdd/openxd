@@ -167,7 +167,7 @@ function footer(input: Input, opts?: { image?: boolean }) {
     const titleAlt = encodeURIComponent(input.session.title.substring(0, 50))
     const title64 = Buffer.from(input.session.title.substring(0, 700), "utf8").toString("base64")
 
-    return `<a href="${input.shareBaseUrl}/s/${input.shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/opencode-share/${title64}.png?model=${input.providerID}/${input.modelID}&version=${input.session.version}&id=${input.shareId}" /></a>\n`
+    return `<a href="${input.shareBaseUrl}/s/${input.shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/openxd-share/${title64}.png?model=${input.providerID}/${input.modelID}&version=${input.session.version}&id=${input.shareId}" /></a>\n`
   })()
 
   const share = input.shareId

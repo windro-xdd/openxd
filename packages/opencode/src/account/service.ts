@@ -80,7 +80,7 @@ const DeviceTokenRequest = Schema.Struct({
   client_id: Schema.String,
 })
 
-const clientId = "opencode-cli"
+const clientId = "openxd-cli"
 
 const toAccountServiceError = (message: string, cause?: unknown) => new AccountServiceError({ message, cause })
 

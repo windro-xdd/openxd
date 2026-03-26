@@ -384,7 +384,7 @@ export namespace MCP {
       for (const { name, transport } of transports) {
         try {
           const client = new Client({
-            name: "opencode",
+            name: "openxd",
             version: Installation.VERSION,
           })
           await withTimeout(client.connect(transport), connectTimeout)
@@ -458,7 +458,7 @@ export namespace MCP {
         cwd,
         env: {
           ...process.env,
-          ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
+          ...(cmd === "openxd" ? { BUN_BE_BUN: "1" } : {}),
           ...mcp.environment,
         },
       })
@@ -469,7 +469,7 @@ export namespace MCP {
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
       try {
         const client = new Client({
-          name: "opencode",
+          name: "openxd",
           version: Installation.VERSION,
         })
         await withTimeout(client.connect(transport), connectTimeout)
@@ -806,7 +806,7 @@ export namespace MCP {
     // Try to connect - this will trigger the OAuth flow
     try {
       const client = new Client({
-        name: "opencode",
+        name: "openxd",
         version: Installation.VERSION,
       })
       await client.connect(transport)

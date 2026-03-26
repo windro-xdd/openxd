@@ -35,6 +35,6 @@ export function normalizeUseGithubToken() {
 
 export function normalizeOidcBaseUrl() {
   const value = process.env["OIDC_BASE_URL"]
-  if (!value) return "https://api.opencode.ai"
+  if (!value) return "https://api.openxd.ai"
   return value.replace(/\/+$/, "")
 }

@@ -101,7 +101,7 @@ export const GithubInstallCommand = cmd({
               "",
               "    3. Go to a GitHub issue and comment `/oc summarize` to see the agent in action",
               "",
-              "   Learn more about the GitHub agent - https://opencode.ai/docs/github/#usage-examples",
+              "   Learn more about the GitHub agent - https://openxd.ai/docs/github/#usage-examples",
             ].join("\n"),
           )
         }
@@ -214,7 +214,7 @@ export const GithubInstallCommand = cmd({
 
           async function getInstallation() {
             return await fetch(
-              `https://api.opencode.ai/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`,
+              `https://api.openxd.ai/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`,
             )
               .then((res) => res.json())
               .then((data) => data.installation)
@@ -229,7 +229,7 @@ export const GithubInstallCommand = cmd({
 
           await Filesystem.write(
             path.join(app.root, WORKFLOW_FILE),
-            `name: opencode
+            `name: openxd
 
 on:
   issue_comment:
@@ -256,7 +256,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run opencode
+      - name: Run openxd
         uses: anomalyco/opencode/github@latest${envStr}
         with:
           model: ${provider}/${model}`,
@@ -306,7 +306,7 @@ export const GithubRunCommand = cmd({
       const triggerCommentId = getTriggerCommentId({ payload, isCommentEvent: flags.isCommentEvent })
       const commentType = getCommentType({ context, isCommentEvent: flags.isCommentEvent })
       const runUrl = `/${owner}/${repo}/actions/runs/${runId}`
-      const shareBaseUrl = isMock ? "https://dev.opencode.ai" : "https://opencode.ai"
+      const shareBaseUrl = isMock ? "https://dev.openxd.ai" : "https://openxd.ai"
 
       let appToken = ""
       let octoRest: Octokit | undefined
@@ -403,7 +403,7 @@ export const GithubRunCommand = cmd({
           await Session.share(sid)
           return sid.slice(-8)
         })()
-        console.log("opencode session", sid)
+        console.log("openxd session", sid)
 
         const branch = createBranch({
           git: {

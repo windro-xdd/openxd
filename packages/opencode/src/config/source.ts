@@ -2,7 +2,7 @@ function record(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x)
 }
 
-export const CONFIG_FILES = ["opencode.jsonc", "opencode.json"] as const
+export const CONFIG_FILES = ["openxd.jsonc", "openxd.json"] as const
 
 export function normalizeWellKnownUrl(url: string) {
   return url.replace(/\/+$/, "")

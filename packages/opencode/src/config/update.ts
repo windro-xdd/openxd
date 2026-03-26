@@ -59,7 +59,7 @@ export function parseConfig(
 }
 
 export function globalConfigFile(globalDir: string, exists: (file: string) => boolean) {
-  const files = ["opencode.jsonc", "opencode.json", "config.json"].map((file) => path.join(globalDir, file))
+  const files = ["openxd.jsonc", "openxd.json", "config.json"].map((file) => path.join(globalDir, file))
   for (const file of files) {
     if (exists(file)) return file
   }

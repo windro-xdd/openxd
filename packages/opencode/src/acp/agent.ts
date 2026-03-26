@@ -521,14 +521,14 @@ export namespace ACP {
       const authMethod: AuthMethod = {
         description: "Run `opencode auth login` in the terminal",
         name: "Login with opencode",
-        id: "opencode-login",
+        id: "openxd-login",
       }
 
       // If client supports terminal-auth capability, use that instead.
       if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
         authMethod._meta = {
           "terminal-auth": {
-            command: "opencode",
+            command: "openxd",
             args: ["auth", "login"],
             label: "OpenCode Login",
           },
@@ -1563,10 +1563,10 @@ export namespace ACP {
 
     if (specified && !providers.length) return specified
 
-    const opencodeProvider = providers.find((p) => p.id === "opencode")
+    const opencodeProvider = providers.find((p) => p.id === "openxd")
     if (opencodeProvider) {
       if (opencodeProvider.models["big-pickle"]) {
-        return { providerID: "opencode", modelID: "big-pickle" }
+        return { providerID: "openxd", modelID: "big-pickle" }
       }
       const [best] = Provider.sort(Object.values(opencodeProvider.models))
       if (best) {
@@ -1588,7 +1588,7 @@ export namespace ACP {
 
     if (specified) return specified
 
-    return { providerID: "opencode", modelID: "big-pickle" }
+    return { providerID: "openxd", modelID: "big-pickle" }
   }
 
   function parseUri(
