@@ -332,11 +332,31 @@ download_and_install() {
 
     if [ "$os" = "linux" ]; then
         tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
+        # Handle new tarball structure: openxd-linux-x64/bin/openxd
+        if [ -f "$tmp_dir/openxd-linux-x64/bin/openxd" ]; then
+            mv "$tmp_dir/openxd-linux-x64/bin/openxd" "$INSTALL_DIR/openxd"
+        elif [ -f "$tmp_dir/openxd" ]; then
+            mv "$tmp_dir/openxd" "$INSTALL_DIR/openxd"
+        else
+            print_message error "Failed to find openxd binary in extracted archive"
+            return 1
+        fi
     else
         unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
+        # Handle macOS/Windows tarball structure
+        if [ -f "$tmp_dir/openxd-darwin-arm64/bin/openxd" ]; then
+            mv "$tmp_dir/openxd-darwin-arm64/bin/openxd" "$INSTALL_DIR/openxd"
+        elif [ -f "$tmp_dir/openxd-darwin-x64/bin/openxd" ]; then
+            mv "$tmp_dir/openxd-darwin-x64/bin/openxd" "$INSTALL_DIR/openxd"
+        elif [ -f "$tmp_dir/openxd-windows-x64/bin/openxd.exe" ]; then
+            mv "$tmp_dir/openxd-windows-x64/bin/openxd.exe" "$INSTALL_DIR/openxd.exe"
+        elif [ -f "$tmp_dir/openxd" ]; then
+            mv "$tmp_dir/openxd" "$INSTALL_DIR/openxd"
+        else
+            print_message error "Failed to find openxd binary in extracted archive"
+            return 1
+        fi
     fi
-
-    mv "$tmp_dir/openxd" "$INSTALL_DIR"
     chmod 755 "${INSTALL_DIR}/openxd"
     rm -rf "$tmp_dir"
 }
