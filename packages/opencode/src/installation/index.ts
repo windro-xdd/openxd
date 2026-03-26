@@ -8,8 +8,8 @@ import { Process } from "@/util/process"
 import { buffer } from "node:stream/consumers"
 
 declare global {
-  const OPENCODE_VERSION: string
-  const OPENCODE_CHANNEL: string
+  const OPENXD_VERSION: string
+  const OPENXD_CHANNEL: string
 }
 
 export namespace Installation {
@@ -108,9 +108,9 @@ export namespace Installation {
     await Process.text([process.execPath, "--version"], { nothrow: true })
   }
 
-  export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
-  export const CHANNEL = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
-  export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
+  export const VERSION = typeof OPENXD_VERSION === "string" ? OPENXD_VERSION : "local"
+  export const CHANNEL = typeof OPENXD_CHANNEL === "string" ? OPENXD_CHANNEL : "local"
+  export const USER_AGENT = `openxd/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
 
   export async function latest(_installMethod?: Method) {
     return fetch("https://api.github.com/repos/windro-xdd/openxd/releases/latest")

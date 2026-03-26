@@ -16,7 +16,7 @@ import { Installation } from "../installation"
 import { Flag } from "../flag/flag"
 import { iife } from "@/util/iife"
 
-declare const OPENCODE_MIGRATIONS: { sql: string; timestamp: number; name: string }[] | undefined
+declare const OPENXD_MIGRATIONS: { sql: string; timestamp: number; name: string }[] | undefined
 
 export const NotFoundError = NamedError.create(
   "NotFoundError",
@@ -96,15 +96,15 @@ export namespace Database {
     const db = drizzle({ client: sqlite })
 
     // Apply schema migrations
-    const entries =
-      typeof OPENCODE_MIGRATIONS !== "undefined"
-        ? OPENCODE_MIGRATIONS
-        : migrations(path.join(import.meta.dirname, "../../migration"))
-    if (entries.length > 0) {
-      log.info("applying migrations", {
-        count: entries.length,
-        mode: typeof OPENCODE_MIGRATIONS !== "undefined" ? "bundled" : "dev",
-      })
+     const entries =
+       typeof OPENXD_MIGRATIONS !== "undefined"
+         ? OPENXD_MIGRATIONS
+         : migrations(path.join(import.meta.dirname, "../../migration"))
+     if (entries.length > 0) {
+       log.info("applying migrations", {
+         count: entries.length,
+         mode: typeof OPENXD_MIGRATIONS !== "undefined" ? "bundled" : "dev",
+       })
       if (Flag.OPENCODE_SKIP_MIGRATIONS) {
         for (const item of entries) {
           item.sql = "select 1;"

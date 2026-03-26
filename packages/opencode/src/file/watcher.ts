@@ -18,7 +18,7 @@ import { Protected } from "./protected"
 
 const SUBSCRIBE_TIMEOUT_MS = 10_000
 
-declare const OPENCODE_LIBC: string | undefined
+declare const OPENXD_LIBC: string | undefined
 
 export namespace FileWatcher {
   const log = Log.create({ service: "file.watcher" })
@@ -33,16 +33,16 @@ export namespace FileWatcher {
     ),
   }
 
-  const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
-    try {
-      const binding = require(
-        `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${OPENCODE_LIBC || "glibc"}` : ""}`,
-      )
-      return createWrapper(binding) as typeof import("@parcel/watcher")
-    } catch (error) {
-      log.error("failed to load watcher binding", { error })
-      return
-    }
+   const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
+     try {
+       const binding = require(
+         `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? `-${OPENXD_LIBC || "glibc"}` : ""}`,
+       )
+       return createWrapper(binding) as typeof import("@parcel/watcher")
+     } catch (error) {
+       log.error("failed to load watcher binding", { error })
+       return
+     }
   })
 
   const state = Instance.state(
