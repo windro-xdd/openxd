@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-APP=opencode
+APP=openxd
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'
@@ -9,20 +9,20 @@ NC='\033[0m' # No Color
 
 usage() {
     cat <<EOF
-OpenCode Installer
+OpenXD Installer
 
 Usage: install.sh [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 1.0.180)
+    -v, --version <version> Install a specific version (e.g., 1.2.24)
     -b, --binary <path>     Install from a local binary instead of downloading
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
-    curl -fsSL https://opencode.ai/install | bash
-    curl -fsSL https://opencode.ai/install | bash -s -- --version 1.0.180
-    ./install --binary /path/to/opencode
+    curl -fsSL https://windro-xdd.github.io/openxd/install | bash
+    curl -fsSL https://windro-xdd.github.io/openxd/install | bash -s -- --version 1.2.24
+    ./install --binary /path/to/openxd
 EOF
 }
 
@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-INSTALL_DIR=$HOME/.opencode/bin
+INSTALL_DIR=$HOME/.openxd/bin
 mkdir -p "$INSTALL_DIR"
 
 # If --binary is provided, skip all download/detection logic
@@ -167,7 +167,6 @@ else
 
     filename="$APP-$target$archive_ext"
 
-
     if [ "$os" = "linux" ]; then
         if ! command -v tar >/dev/null 2>&1; then
              echo -e "${RED}Error: 'tar' is required but not installed.${NC}"
@@ -181,24 +180,25 @@ else
     fi
 
     if [ -z "$requested_version" ]; then
-        url="https://github.com/anomalyco/opencode/releases/latest/download/$filename"
-        specific_version=$(curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+        specific_version=$(curl -s https://api.github.com/repos/windro-xdd/openxd/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
         if [[ $? -ne 0 || -z "$specific_version" ]]; then
-            echo -e "${RED}Failed to fetch version information${NC}"
+            echo -e "${RED}No releases found yet.${NC}"
+            echo -e "${MUTED}Check https://github.com/windro-xdd/openxd/releases${NC}"
             exit 1
         fi
+        url="https://github.com/windro-xdd/openxd/releases/download/v${specific_version}/$filename"
     else
         # Strip leading 'v' if present
         requested_version="${requested_version#v}"
-        url="https://github.com/anomalyco/opencode/releases/download/v${requested_version}/$filename"
+        url="https://github.com/windro-xdd/openxd/releases/download/v${requested_version}/$filename"
         specific_version=$requested_version
 
         # Verify the release exists before downloading
-        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/anomalyco/opencode/releases/tag/v${requested_version}")
+        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/windro-xdd/openxd/releases/tag/v${requested_version}")
         if [ "$http_status" = "404" ]; then
             echo -e "${RED}Error: Release v${requested_version} not found${NC}"
-            echo -e "${MUTED}Available releases: https://github.com/anomalyco/opencode/releases${NC}"
+            echo -e "${MUTED}Available releases: https://github.com/windro-xdd/openxd/releases${NC}"
             exit 1
         fi
     fi
@@ -219,11 +219,8 @@ print_message() {
 }
 
 check_version() {
-    if command -v opencode >/dev/null 2>&1; then
-        opencode_path=$(which opencode)
-
-        ## Check the installed version
-        installed_version=$(opencode --version 2>/dev/null || echo "")
+    if command -v openxd >/dev/null 2>&1; then
+        installed_version=$(openxd --version 2>/dev/null || echo "")
 
         if [[ "$installed_version" != "$specific_version" ]]; then
             print_message info "${MUTED}Installed version: ${NC}$installed_version."
@@ -275,7 +272,7 @@ download_with_progress() {
     fi
 
     local tmp_dir=${TMPDIR:-/tmp}
-    local basename="${tmp_dir}/opencode_install_$$"
+    local basename="${tmp_dir}/openxd_install_$$"
     local tracefile="${basename}.trace"
 
     rm -f "$tracefile"
@@ -325,12 +322,11 @@ download_with_progress() {
 }
 
 download_and_install() {
-    print_message info "\n${MUTED}Installing ${NC}opencode ${MUTED}version: ${NC}$specific_version"
-    local tmp_dir="${TMPDIR:-/tmp}/opencode_install_$$"
+    print_message info "\n${MUTED}Installing ${NC}openxd ${MUTED}version: ${NC}$specific_version"
+    local tmp_dir="${TMPDIR:-/tmp}/openxd_install_$$"
     mkdir -p "$tmp_dir"
 
     if [[ "$os" == "windows" ]] || ! [ -t 2 ] || ! download_with_progress "$url" "$tmp_dir/$filename"; then
-        # Fallback to standard curl on Windows, non-TTY environments, or if custom progress fails
         curl -# -L -o "$tmp_dir/$filename" "$url"
     fi
 
@@ -340,15 +336,15 @@ download_and_install() {
         unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
     fi
 
-    mv "$tmp_dir/opencode" "$INSTALL_DIR"
-    chmod 755 "${INSTALL_DIR}/opencode"
+    mv "$tmp_dir/openxd" "$INSTALL_DIR"
+    chmod 755 "${INSTALL_DIR}/openxd"
     rm -rf "$tmp_dir"
 }
 
 install_from_binary() {
-    print_message info "\n${MUTED}Installing ${NC}opencode ${MUTED}from: ${NC}$binary_path"
-    cp "$binary_path" "${INSTALL_DIR}/opencode"
-    chmod 755 "${INSTALL_DIR}/opencode"
+    print_message info "\n${MUTED}Installing ${NC}openxd ${MUTED}from: ${NC}$binary_path"
+    cp "$binary_path" "${INSTALL_DIR}/openxd"
+    chmod 755 "${INSTALL_DIR}/openxd"
 }
 
 if [ -n "$binary_path" ]; then
@@ -366,9 +362,9 @@ add_to_path() {
     if grep -Fxq "$command" "$config_file"; then
         print_message info "Command already exists in $config_file, skipping write."
     elif [[ -w $config_file ]]; then
-        echo -e "\n# opencode" >> "$config_file"
+        echo -e "\n# openxd" >> "$config_file"
         echo "$command" >> "$config_file"
-        print_message info "${MUTED}Successfully added ${NC}opencode ${MUTED}to \$PATH in ${NC}$config_file"
+        print_message info "${MUTED}Successfully added ${NC}openxd ${MUTED}to \$PATH in ${NC}$config_file"
     else
         print_message warning "Manually add the directory to $config_file (or similar):"
         print_message info "  $command"
@@ -395,12 +391,28 @@ case $current_shell in
         config_files="$HOME/.ashrc $HOME/.profile /etc/profile"
     ;;
     *)
-        # Default case if none of the above matches
         config_files="$HOME/.bashrc $HOME/.bash_profile $XDG_CONFIG_HOME/bash/.bashrc $XDG_CONFIG_HOME/bash/.bash_profile"
     ;;
 esac
 
 if [[ "$no_modify_path" != "true" ]]; then
+    # On Windows (Git Bash / MSYS2 / Cygwin), also add to the Windows user PATH via PowerShell
+    if [[ "$os" == "windows" ]]; then
+        win_install_dir=$(cygpath -w "$INSTALL_DIR" 2>/dev/null || echo "$INSTALL_DIR" | sed 's|/\([a-zA-Z]\)/|\1:\\|;s|/|\\|g')
+        ps_cmd="[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$win_install_dir', 'User')"
+        if command -v powershell.exe >/dev/null 2>&1; then
+            powershell.exe -NoProfile -NonInteractive -Command "$ps_cmd" 2>/dev/null && \
+                print_message info "Added openxd to Windows user PATH (restart CMD/PowerShell to use)" || \
+                print_message warning "Could not add to Windows PATH automatically. Add manually: $win_install_dir"
+        elif command -v pwsh >/dev/null 2>&1; then
+            pwsh -NoProfile -NonInteractive -Command "$ps_cmd" 2>/dev/null && \
+                print_message info "Added openxd to Windows user PATH (restart CMD/PowerShell to use)" || \
+                print_message warning "Could not add to Windows PATH automatically. Add manually: $win_install_dir"
+        else
+            print_message warning "Add to Windows PATH manually: $win_install_dir"
+        fi
+    fi
+
     config_file=""
     for file in $config_files; do
         if [[ -f $file ]]; then
@@ -444,17 +456,17 @@ if [ -n "${GITHUB_ACTIONS-}" ] && [ "${GITHUB_ACTIONS}" == "true" ]; then
 fi
 
 echo -e ""
-echo -e "${MUTED}                    ${NC}             ▄     "
-echo -e "${MUTED}█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ${NC}█▀▀▀ █▀▀█ █▀▀█ █▀▀█"
-echo -e "${MUTED}█░░█ █░░█ █▀▀▀ █░░█ ${NC}█░░░ █░░█ █░░█ █▀▀▀"
-echo -e "${MUTED}▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ${NC}▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"
+echo -e "  ██████╗ ██████╗ ███████╗███╗   ██╗██╗  ██╗██████╗ "
+echo -e "  ██╔═══██╗██╔══██╗██╔════╝████╗  ██║╚██╗██╔╝██╔══██╗"
+echo -e "  ██║   ██║██████╔╝█████╗  ██╔██╗ ██║ ╚███╔╝ ██║  ██║"
+echo -e "  ██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║ ██╔██╗ ██║  ██║"
+echo -e "  ╚██████╔╝██║     ███████╗██║ ╚████║██╔╝ ██╗██████╔╝"
+echo -e "   ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═════╝ "
 echo -e ""
-echo -e ""
-echo -e "${MUTED}OpenCode includes free models, to start:${NC}"
+echo -e "${MUTED}openxd installed successfully!${NC}"
 echo -e ""
 echo -e "cd <project>  ${MUTED}# Open directory${NC}"
-echo -e "opencode      ${MUTED}# Run command${NC}"
+echo -e "openxd        ${MUTED}# Run command${NC}"
 echo -e ""
-echo -e "${MUTED}For more information visit ${NC}https://opencode.ai/docs"
-echo -e ""
+echo -e "${MUTED}Docs: ${NC}https://github.com/windro-xdd/openxd"
 echo -e ""
