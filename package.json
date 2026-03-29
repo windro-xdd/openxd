@@ -6,9 +6,7 @@
   "type": "module",
   "packageManager": "bun@1.3.11",
   "scripts": {
-    "dev:tui": "ulimit -n 10240 2>/dev/null; bun run --cwd packages/console/app dev",
-    "dev:web": "bun --cwd packages/web dev",
-    "dev:openxd": "bun run --cwd packages/openxd src/index.ts",
+    "dev": "bun run --cwd packages/openxd src/index.ts",
     "typecheck": "bun typecheck",
     "test": "bun --cwd packages/openxd test test/agent/",
     "test:all": "bun --cwd packages/openxd test"
@@ -16,8 +14,6 @@
   "workspaces": {
     "packages": [
       "packages/openxd",
-      "packages/console/*",
-      "packages/web",
       "packages/util",
       "packages/script",
       "packages/sdk/js",
